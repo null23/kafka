@@ -21,9 +21,20 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * A simple read-optimized map implementation that synchronizes only writes and does a full copy on each modification
+ * 这个数据结构，k -> Partition，v -> Deque<RecordBatch>
+ * 本数据结构的适用场景，是读多写少的情况
+ * 很明显，每个 Partition 对应的 RecordBatch 队列并不会频繁创建，每个 Topic 创建一次就够了
+ * 因此很适合这个场景
  */
 public class CopyOnWriteMap<K, V> implements ConcurrentMap<K, V> {
 
+    /**
+     * 本数据结构是基于 COW 的思想来实现的，其实这个就是内存快照
+     * 并且，是 volatile 来修饰的，因为需要写入的数据可以立马被其他线程读取到
+     *
+     * 这个数据结构，最重要的方法是
+     * @see org.apache.kafka.common.utils.CopyOnWriteMap#putIfAbsent(java.lang.Object, java.lang.Object)
+     */
     private volatile Map<K, V> map;
 
     public CopyOnWriteMap() {
@@ -102,6 +113,13 @@ public class CopyOnWriteMap<K, V> implements ConcurrentMap<K, V> {
         return prev;
     }
 
+    /**
+     * 可以好好思考一下，Kafka 实现的 CopyOnWrite，是如何实现读写并发控制的
+     * 既然没有使用读写的互斥，又是如何实现让写的数据立马让读请求可以看到的？
+     * @param k
+     * @param v
+     * @return
+     */
     @Override
     public synchronized V putIfAbsent(K k, V v) {
         if (!containsKey(k))

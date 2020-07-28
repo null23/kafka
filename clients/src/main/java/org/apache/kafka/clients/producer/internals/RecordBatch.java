@@ -39,6 +39,11 @@ public final class RecordBatch {
     public final long createdMs;
     public long drainedMs;
     public long lastAttemptMs;
+
+    /**
+     *  MemoryRecords是 Kafka 中 Record 在内存中的实现形式
+     *  这里边封装了 ByteBuffer，以及一系列和 ByteBuffer 相关的东西，其实写入 RecordBatch 的数据，都是写入这里的 ByteBuffer 里了
+     */
     public final MemoryRecords records;
     public final TopicPartition topicPartition;
     public final ProduceRequestResult produceFuture;
@@ -62,6 +67,8 @@ public final class RecordBatch {
      * Append the record to the current record set and return the relative offset within that record set
      * 
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
+     *
+     * 尝试向 MemoryRecords 里写入新的数据
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, long now) {
         if (!this.records.hasRoomFor(key, value)) {

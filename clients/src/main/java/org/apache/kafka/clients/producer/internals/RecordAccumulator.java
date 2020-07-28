@@ -59,19 +59,62 @@ public final class RecordAccumulator {
 
     private static final Logger log = LoggerFactory.getLogger(RecordAccumulator.class);
 
+    /**
+     * client 是否下线
+     */
     private volatile boolean closed;
+
     private final AtomicInteger flushesInProgress;
+
+    /**
+     * 正在操作缓冲区的线程数量
+     */
     private final AtomicInteger appendsInProgress;
+
+    /**
+     * 每个 batch 的大小
+     */
     private final int batchSize;
+
+    /**
+     * 压缩算法的类型
+     */
     private final CompressionType compression;
+
+    /**
+     * 一个 batch 超过多久都没有满，还是要发送出去
+     */
     private final long lingerMs;
+
+    /**
+     * 重试的时间间隔
+     */
     private final long retryBackoffMs;
+
+    /**
+     * 内存池，存储了其他空闲的 ByteBuffer 队列
+     */
     private final BufferPool free;
+
     private final Time time;
+
+    /**
+     * 核心数据结构
+     * Partition 和 RecordBatch 队列的映射关系
+     * 这里 Kafka 自己实现了一个线程安全的 Map，CopyOnWriteMap，使用的 COW 的思想，适合这种读多写少的场景
+     * 毕竟写入的情况其实针对每个 Partition 只会发生一次
+     * @see org.apache.kafka.common.utils.CopyOnWriteMap
+     */
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+
+    /**
+     * 还没有满的 RecordBatch 集合，满了的话就可以通过 Sender 线程发送出去了
+     */
     private final IncompleteRecordBatches incomplete;
+
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Set<TopicPartition> muted;
+
     private int drainIndex;
 
     /**
@@ -154,6 +197,8 @@ public final class RecordAccumulator {
      * @param value The value for the record
      * @param callback The user-supplied callback to execute when the request is complete
      * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
+     *
+     * 向缓冲区写入消息
      */
     public RecordAppendResult append(TopicPartition tp,
                                      long timestamp,
@@ -165,11 +210,15 @@ public final class RecordAccumulator {
         // abortIncompleteBatches().
         appendsInProgress.incrementAndGet();
         try {
-            // check if we have an in-progress batch
+            // 创建/获取一个维护 RecordBatch 的队列
+            // 在第一个线程第一次进入这个方法的时候，会创建一个空的队列
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
+
+                // double-check
+                // 尝试获取一个 RecordBatch 并且写入消息的数据
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;
@@ -206,12 +255,21 @@ public final class RecordAccumulator {
     /**
      * If `RecordBatch.tryAppend` fails (i.e. the record batch is full), close its memory records to release temporary
      * resources (like compression streams buffers).
+     *
+     * 从队尾获取一个 RecordBatch，然后往里写数据
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
+        // 从队尾获取一个 RecordBatch
         RecordBatch last = deque.peekLast();
+
+        // 第一次进入这里，没有创建 RecordBatch，直接就返回 null 了
         if (last != null) {
+            // 之前创建过 RecordBatch 了，直接拿出来用
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());
+            // 如果 future == null，说明最后一个 RecordBatch 剩余的空间不够了
+            // 这样就得重新申请一个新的 RecordBatch 了
             if (future == null)
+                // 关闭上一个 RecordBatch，里边用了很多 NIO 的 API，要看下的
                 last.records.close();
             else
                 return new RecordAppendResult(future, deque.size() > 1 || last.records.isFull(), false);

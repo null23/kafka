@@ -31,18 +31,33 @@ public class MemoryRecords implements Records {
     private final static int WRITE_LIMIT_FOR_READABLE_ONLY = -1;
 
     // the compressor used for appends-only
+    /**
+     * 压缩算法的类型
+     */
     private final Compressor compressor;
 
     // the write limit for writable buffer, which may be smaller than the buffer capacity
+    /**
+     * ByteBuffer 可以写入的上界
+     */
     private final int writeLimit;
 
     // the capacity of the initial buffer, which is only used for de-allocation of writable records
+    /**
+     * ByteBuffer 初始化的容量大小
+     */
     private final int initialCapacity;
 
     // the underlying buffer used for read; while the records are still writable it is null
+    /**
+     * 具体就是把消息写入到这个 ByteBuffer 里了
+     */
     private ByteBuffer buffer;
 
     // indicate if the memory records is writable or not (i.e. used for appends or read-only)
+    /**
+     * ByteBuffer 是否可以写入
+     */
     private boolean writable;
 
     // Construct a writable memory records
