@@ -86,7 +86,15 @@ public class Compressor {
     private final ByteBufferOutputStream bufferStream;
     private final int initPos;
 
+    /**
+     * 写入过的消息的大小
+     */
     public long writtenUncompressed;
+
+    /**
+     * 写入了几条消息记录
+     * 比如说发送了 3 次消息，那就是 3
+     */
     public long numRecords;
     public float compressionRate;
     public long maxTimestamp;

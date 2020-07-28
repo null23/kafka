@@ -32,19 +32,24 @@ public class MemoryRecords implements Records {
 
     // the compressor used for appends-only
     /**
-     * 压缩算法的类型
+     * 具体写入 ByteBuffer 其实就是通过 Compressor
+     * MemoryRecords 并不写入 ByteBuffer，只是进行一些上界等限制的设定
+     * 真正写入 ByteBuffer 的还是 Compressor
+     * 按照我现在的理解，是等到 Compressor 写完之后，在 MemoryRecords close 的时候再把 Compressor 的 ByteBufferOutputStream 转换为 ByteBuffer 给 MemoryRecords
      */
     private final Compressor compressor;
 
     // the write limit for writable buffer, which may be smaller than the buffer capacity
     /**
-     * ByteBuffer 可以写入的上界
+     * ByteBuffer 可以写入的上界，默认就是 batch.size
      */
     private final int writeLimit;
 
     // the capacity of the initial buffer, which is only used for de-allocation of writable records
     /**
      * ByteBuffer 初始化的容量大小
+     * 这个的大小，取决于写入的消息的大小，和 batch.size
+     * 如果写入的消息大小是 3MB，但是 batch.size 是默认的 16KB，那么这里的 ByteBuffer 的大小肯定是 3MB
      */
     private final int initialCapacity;
 
@@ -105,14 +110,23 @@ public class MemoryRecords implements Records {
     /**
      * Append a new record and offset to the buffer
      * @return crc of the record
+     *
+     * 基于 Kafka 定义的二进制协议，把消息的数据写入 ByteBuffer
      */
     public long append(long offset, long timestamp, byte[] key, byte[] value) {
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
 
+        // 发送的消息的大小，定义这些大小，主要是为了到时候粘包拆包用
         int size = Record.recordSize(key, value);
+
+        // 8 个字节的 offset
         compressor.putLong(offset);
+
+        // 4 个字节的 size
         compressor.putInt(size);
+
+        // 写入一些消息相关的核心数据
         long crc = compressor.putRecord(timestamp, key, value);
         compressor.recordWritten(size + Records.LOG_OVERHEAD);
         return crc;
@@ -129,8 +143,12 @@ public class MemoryRecords implements Records {
      * capacity will be the message size which is larger than the write limit, i.e. the batch size. In this case
      * the checking should be based on the capacity of the initialized buffer rather than the write limit in order
      * to accept this single record.
+     *
+     * ByteBuffer 的剩余空间还够不
      */
     public boolean hasRoomFor(byte[] key, byte[] value) {
+        // 不能写了，一般就是写满了，当前的 MemoryRecords 被 close 了
+        // 一般就得重新创建一个 RecordBatch 和 MemoryRecords 了
         if (!this.writable)
             return false;
 
@@ -145,6 +163,9 @@ public class MemoryRecords implements Records {
 
     /**
      * Close this batch for no more appends
+     *
+     * 关闭当前的 MemoryRecords，然后对当前的 ByteBuffer 进行一系列的操作，比如把 ByteBuffer 切换到读模式
+     * 一般是当前的 RecordBatch 写满了，就会关闭了
      */
     public void close() {
         if (writable) {
@@ -153,9 +174,11 @@ public class MemoryRecords implements Records {
 
             // flip the underlying buffer to be ready for reads
             buffer = compressor.buffer();
+            // ByteBuffer 从写模式切换到读模式
             buffer.flip();
 
             // reset the writable flag
+            // 切换写模式标志位
             writable = false;
         }
     }

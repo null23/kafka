@@ -154,6 +154,9 @@ public final class Record {
         }
     }
 
+    /**
+     * 这里是真正向 ByteBuffer 写入消息的地方
+     */
     public static void write(Compressor compressor, long crc, byte attributes, long timestamp, byte[] key, byte[] value, int valueOffset, int valueSize) {
         // write crc
         compressor.putInt((int) (crc & 0xffffffffL));
@@ -184,6 +187,12 @@ public final class Record {
         return recordSize(key == null ? 0 : key.length, value == null ? 0 : value.length);
     }
 
+    /**
+     * 消息的长度
+     * @param keySize
+     * @param valueSize
+     * @return
+     */
     public static int recordSize(int keySize, int valueSize) {
         return CRC_LENGTH + MAGIC_LENGTH + ATTRIBUTE_LENGTH + TIMESTAMP_LENGTH + KEY_SIZE_LENGTH + keySize + VALUE_SIZE_LENGTH + valueSize;
     }

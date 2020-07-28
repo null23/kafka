@@ -88,6 +88,10 @@ public final class BufferPool {
      * @throws InterruptedException If the thread is interrupted while blocked
      * @throws IllegalArgumentException if size is larger than the total memory controlled by the pool (and hence we would block
      *         forever)
+     *
+     * 申请一块内存空间
+     * 有可能是从内存池的 free 里直接拿，也有可能是自己基于 availableMemory 新申请
+     * 如果一直拿不到就只能阻塞住等待了，超过时间就gg
      */
     public ByteBuffer allocate(int size, long maxTimeToBlockMs) throws InterruptedException {
         if (size > this.totalMemory)
