@@ -132,23 +132,89 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private static final AtomicInteger PRODUCER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.producer";
 
+    /**
+     * 每个 Client 持有一个 clientId，正常情况，一个应用程序只会持有一个 KafkaProducer
+     */
     private String clientId;
+
+    /**
+     * 分区器组件
+     */
     private final Partitioner partitioner;
+
+    /**
+     * 请求最大大小
+     */
     private final int maxRequestSize;
+
+    /**
+     * 缓冲区的大小
+     */
     private final long totalMemorySize;
+
+    /**
+     * 元数据组件
+     */
     private final Metadata metadata;
+
+    /**
+     * 缓冲区组件
+     */
     private final RecordAccumulator accumulator;
+
+    /**
+     * 负责从缓冲区轮询发送消息和拉取元数据的，Sender 其实不是一个线程，只是处理任务的逻辑
+     * 真正管理线程行为的是 KafkaThread，也就是下边的那个 ioThread
+     */
     private final Sender sender;
+
+    /**
+     * 一些监控指标相关的东西
+     */
     private final Metrics metrics;
+
+    /**
+     * 负责处理 IO 的线程，其实就是 Sender 套了个壳子，本质是 KafkaThread
+     */
     private final Thread ioThread;
+
+    /**
+     * 压缩算法的类型
+     */
     private final CompressionType compressionType;
+
+    /**
+     * 性能监控相关的，目前不关注这个
+     */
     private final Sensor errors;
+
     private final Time time;
+
+    /**
+     * 序列化组件
+     */
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
+
+    /**
+     * KafkaProducer 的一些配置，出了我们初始化 KafkaProducer 的时候自己配置的，还有一些缺省默认值的初始化
+     */
     private final ProducerConfig producerConfig;
+
+    /**
+     * 消息从 Leader 同步到 Follower 的时候最多等待多久
+     * 根 ISR 列表那些有关，必须有几个 Partition 在 ISR 列表
+     */
     private final long maxBlockTimeMs;
+
+    /**
+     * 一次发送消息请求的最大时间
+     */
     private final int requestTimeoutMs;
+
+    /**
+     * 拦截器，不咋用，为用户提供了一些扩展
+     */
     private final ProducerInterceptors<K, V> interceptors;
 
     /**
@@ -479,6 +545,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // 如果获取元数据信息的时候耗时过长，会导致后续剩余的时间不够
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
+
+            // 发送消息时指定的 key，会根据 key hash 来决定发送到哪个分区
             byte[] serializedKey;
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.key());
@@ -496,8 +564,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " specified in value.serializer");
             }
 
+            // 根据 Partitioner 来针对某个 Topic 进行分区
             int partition = partition(record, serializedKey, serializedValue, cluster);
+
+            // 计算出要发送的消息的大小
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
+
+            // 验证消息大小的合法性
             ensureValidRecordSize(serializedSize);
             tp = new TopicPartition(record.topic(), partition);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
@@ -776,6 +849,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * computes partition for given record.
      * if the record has partition returns the value otherwise
      * calls configured partitioner class to compute the partition.
+     * 决定本次发送消息要发送到哪个 Partition
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
         Integer partition = record.partition();

@@ -32,6 +32,8 @@ import org.apache.kafka.common.utils.Utils;
  * <li>If a partition is specified in the record, use it
  * <li>If no partition is specified but a key is present choose a partition based on a hash of the key
  * <li>If no partition or key is present choose a partition in a round-robin fashion
+ *
+ * 默认的分区器，也可以自定义自己实现 Partitioner 接口来制定自己的分区器
  */
 public class DefaultPartitioner implements Partitioner {
 
@@ -48,6 +50,10 @@ public class DefaultPartitioner implements Partitioner {
      * @param value The value to partition on or null
      * @param valueBytes serialized value to partition on or null
      * @param cluster The current cluster metadata
+     *
+     * 主要分为两种情况
+     *   1.制定了分区的 key，按照 key 的 hash 值路由到某个分区
+     *   2.RR 轮询发送到所有 Partition，就 murmur2 的这种方式
      */
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
