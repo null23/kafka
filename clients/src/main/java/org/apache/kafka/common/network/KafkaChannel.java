@@ -29,7 +29,15 @@ import java.security.Principal;
 import org.apache.kafka.common.utils.Utils;
 
 public class KafkaChannel {
+
+    /**
+     * BrokerId
+     */
     private final String id;
+
+    /**
+     * 封装了 NIO 的 SocketChannel
+     */
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     private final int maxReceiveSize;

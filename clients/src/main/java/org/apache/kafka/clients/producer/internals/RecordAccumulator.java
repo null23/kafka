@@ -419,10 +419,12 @@ public final class RecordAccumulator {
      * size on a per-node basis. This method attempts to avoid choosing the same topic-node over and over.
      * 
      * @param cluster The current cluster metadata
-     * @param nodes The list of node to drain
+     * @param nodes 所有就绪的 Node
      * @param maxSize The maximum number of bytes to drain
      * @param now The current unix time in milliseconds
      * @return A list of {@link RecordBatch} for each node specified with total size less than the requested maxSize.
+     *
+     * 封装每个 Broker 对应的可以发送的 RecordBatch 集合
      */
     public Map<Integer, List<RecordBatch>> drain(Cluster cluster,
                                                  Set<Node> nodes,
@@ -432,13 +434,16 @@ public final class RecordAccumulator {
             return Collections.emptyMap();
 
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
+        // 获取到所有就绪的 Broker 上的 Partition 都遍历一遍
         for (Node node : nodes) {
             int size = 0;
+            // 这个 Broker 上所有的 Partition
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
             int start = drainIndex = drainIndex % parts.size();
             do {
+                // todo 为什么这里直接就拿了 Partition？能保证一定是就绪的么？
                 PartitionInfo part = parts.get(drainIndex);
                 TopicPartition tp = new TopicPartition(part.topic(), part.partition());
                 // Only proceed if the partition has no in-flight batches.
@@ -448,6 +453,7 @@ public final class RecordAccumulator {
                         synchronized (deque) {
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {
+                                // 如果重试过，是否到了重试的时间间隔
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
                                 // Only drain the batch if it is not during backoff period.
                                 if (!backoff) {

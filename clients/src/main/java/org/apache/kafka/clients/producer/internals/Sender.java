@@ -197,12 +197,14 @@ public class Sender implements Runnable {
             // 判断当前的 Broker 是否已经可以发送 NIO 请求
             // 条件是，没有正在获取元数据，并且已经建立 TCP 长连接
             if (!this.client.ready(node, now)) {
+                // 如果没有建立好连接，就移除 readyNodes
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
             }
         }
 
         // create produce requests
+        // 把就绪的 RecordBatch 根据 Broker 再封装一次
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
@@ -221,15 +223,22 @@ public class Sender implements Runnable {
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
+
+        // 把每个 Broker 对应的 List<RecordBatch> 再封装一道
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
         // that isn't yet sendable (e.g. lingering, backing off). Note that this specifically does not include nodes
         // with sendable data that aren't ready to send since they would cause busy looping.
+
+        // 其实就是算出来下一次 run 的时间，在第一次建立连接的情况下，这里的 pollTimeout 是 nextReadyCheckDelayMs
+        // 在没有重试的情况下，这里的 pollTimeout 其实就是  （linger.ms - 消息等待的时间）
         long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
         if (result.readyNodes.size() > 0) {
             log.trace("Nodes with data ready to send: {}", result.readyNodes);
             log.trace("Created {} produce requests: {}", requests.size(), requests);
+
+            // 如果有就绪的 RecordBatch，就直接把 pollTimeout 设置为 0
             pollTimeout = 0;
         }
         for (ClientRequest request : requests)
@@ -350,16 +359,19 @@ public class Sender implements Runnable {
 
     /**
      * Transfer the record batches into a list of produce requests on a per-node basis
+     * @param collated  k:BrokerId v:BrokerId 对应的可以发送的 RecordBatch 集合
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
         for (Map.Entry<Integer, List<RecordBatch>> entry : collated.entrySet())
+            // 这里是真正把 RecordBatch 集合封装成一个 ClientRequest 的地方
             requests.add(produceRequest(now, entry.getKey(), acks, requestTimeout, entry.getValue()));
         return requests;
     }
 
     /**
      * Create a produce request from the given record batches
+     * 把 RecordPartition 集合封装为一个 ClientRequest
      */
     private ClientRequest produceRequest(long now, int destination, short acks, int timeout, List<RecordBatch> batches) {
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());

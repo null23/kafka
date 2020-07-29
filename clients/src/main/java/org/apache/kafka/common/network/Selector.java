@@ -57,7 +57,7 @@ import org.slf4j.LoggerFactory;
  * <pre>
  * nioSelector.connect(&quot;42&quot;, new InetSocketAddress(&quot;google.com&quot;, server.port), 64000, 64000);
  * </pre>
- *
+8 *
  * The connect call does not block on the creation of the TCP connection, so the connect method only begins initiating
  * the connection. The successful invocation of this method does not mean a valid connection has been established.
  *
@@ -84,6 +84,7 @@ public class Selector implements Selectable {
 
     /**
      * JDK NIO 的 Selector
+     * 一个 Client 只有一个 Selector，负责和所有 Broker 的网络通信
      */
     private final java.nio.channels.Selector nioSelector;
 
@@ -198,6 +199,8 @@ public class Selector implements Selectable {
      * @param receiveBufferSize The receive buffer for the new connection
      * @throws IllegalStateException if there is already a connection for that id
      * @throws IOException if DNS resolution fails on the hostname or if the broker is down
+     *
+     * 和目标 Broker 机器建立 NIO 连接
      */
     @Override
     public void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException {
@@ -205,16 +208,31 @@ public class Selector implements Selectable {
             throw new IllegalStateException("There is already a connection for id " + id);
 
         SocketChannel socketChannel = SocketChannel.open();
+
+        // 设置为非阻塞
         socketChannel.configureBlocking(false);
         Socket socket = socketChannel.socket();
+
+        // 避免客户端和服务端，任何一方断开连接，别人不知道，还一直保持网络连接占用资源
+        // 设置 KeepAlive 之后，2小时内如果双方没有任何通信，那么发送一个探测包，根据探测包的结果，保持连接，重新连接，或者断开连接
         socket.setKeepAlive(true);
+
+        // 底层的 socket 缓冲区的发送的大小
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
+
+        // 底层的 socket 缓冲区的接收的大小
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+
+        // 默认设置为 false 的话，那么就开启 Nagle 算法，会把网络通信中的一些小的数据包给收集起来，然后组装成一个大的包一次性发送出去
+        // 如果大量的小包在传递，会导致网络拥塞
+        // 如果设置为 true 的话，意思就是关闭 Nagle，让发送出去的数据包立马通过网络传输出去
+        // 应该是和 Socket 缓冲区有关系
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            // 尝试连接到 Broker 对应的 Channel 上
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -223,14 +241,22 @@ public class Selector implements Selectable {
             socketChannel.close();
             throw e;
         }
+
+        // 注册并且监听 OP_CONNECT 事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
+
+        // 将 SelectionKey，BrokerId，接收最大大小，封装为一个 KafkaChannel
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+
+        // attach 之后，可以根据 SelectionKey 获取到一个 KafkaChannel
         key.attach(channel);
         this.channels.put(id, channel);
 
+        // 如果立即连接完毕的话
         if (connected) {
             // OP_CONNECT won't trigger for immediately connected channels
             log.debug("Immediately connected to node {}", channel.id());
+            // 把 SelectionKey 缓存起来
             immediatelyConnectedKeys.add(key);
             key.interestOps(0);
         }
@@ -324,11 +350,16 @@ public class Selector implements Selectable {
 
         /* check ready keys */
         long startSelect = time.nanoseconds();
+
+        // 这里调用了 NIO 的 select 方法，阻塞监听就绪的事件，并且设置了一个超时的时间
+        // 其实就是看有没有就绪的事件
         int readyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
 
         if (readyKeys > 0 || !immediatelyConnectedKeys.isEmpty()) {
+            // 核心方法，对就绪的事件进行处理
+            // this.nioSelector.selectedKeys() 就是就绪的 SelectionKeys
             pollSelectionKeys(this.nioSelector.selectedKeys(), false, endSelect);
             pollSelectionKeys(immediatelyConnectedKeys, true, endSelect);
         }
@@ -343,6 +374,10 @@ public class Selector implements Selectable {
         maybeCloseOldestConnection(endSelect);
     }
 
+    /**
+     * select 方法，监听到有事件就绪了
+     * 这里就处理那些就绪的事件
+     */
     private void pollSelectionKeys(Iterable<SelectionKey> selectionKeys,
                                    boolean isImmediatelyConnected,
                                    long currentTimeNanos) {
@@ -350,17 +385,22 @@ public class Selector implements Selectable {
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
             iterator.remove();
+
+            // 之前把 KafkaChannel attch 到 SelectionKey 上了，现在就可以拿到了
             KafkaChannel channel = channel(key);
 
             // register all per-connection metrics at once
             sensors.maybeRegisterConnectionMetrics(channel.id());
             if (idleExpiryManager != null)
+                // 更新一下 Client 和这个 Broker 最近一次通信的时间
+                // 避免连接被回收掉
                 idleExpiryManager.update(channel.id(), currentTimeNanos);
 
             try {
 
                 /* complete any connections that have finished their handshake (either normally or immediately) */
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    // 直到连接建立完成，其实最后调用的还是 SocketChannel 的 finishConnect 的方法
                     if (channel.finishConnect()) {
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
@@ -508,6 +548,7 @@ public class Selector implements Selectable {
         if (ms == 0L)
             return this.nioSelector.selectNow();
         else
+            // 第一次肯定会进到这里
             return this.nioSelector.select(ms);
     }
 
@@ -781,6 +822,13 @@ public class Selector implements Selectable {
     }
 
     // helper class for tracking least recently used connections to enable idle connection closing
+
+    /**
+     * 这个的核心思路是啥，因为一个 Client，总不能和所有 Broker 永远的维持连接，太消耗资源了
+     * 长期不用的长连接，那就应该断开
+     * 因此，就是用了一个 LRU 链表的方式来维护 Client 和 Broker 的连接的热度
+     * 通过维护 LinkedHashMap（JDK 自己实现的 LRU）的数据结构，来对连接是否断开进行管理
+     */
     private static class IdleExpiryManager {
         private final Map<String, Long> lruConnections;
 
@@ -788,6 +836,10 @@ public class Selector implements Selectable {
          * 一个长连接最多可以空闲多久
          */
         private final long connectionsMaxIdleNanos;
+
+        /**
+         * 下一次什么时候检查是否应该清理长连接
+         */
         private long nextIdleCloseCheckTime;
 
         public IdleExpiryManager(Time time, long connectionsMaxIdleMs) {
@@ -797,6 +849,11 @@ public class Selector implements Selectable {
             this.nextIdleCloseCheckTime = time.nanoseconds() + this.connectionsMaxIdleNanos;
         }
 
+        /**
+         * 更新 Client 和某个 Broker 最近的通信时间
+         * @param connectionId  BrokerId
+         * @param currentTimeNanos  最近一次通信的时间
+         */
         public void update(String connectionId, long currentTimeNanos) {
             lruConnections.put(connectionId, currentTimeNanos);
         }

@@ -52,14 +52,23 @@ public class NetworkClient implements KafkaClient {
     /* the selector used to perform network i/o */
     private final Selectable selector;
 
+    /**
+     * 元数据加载的组件
+     */
     private final MetadataUpdater metadataUpdater;
 
     private final Random randOffset;
 
     /* the state of each node's connection */
+    /**
+     * 每个 BrokerId 对应的 Broker 的连接状态
+     */
     private final ClusterConnectionStates connectionStates;
 
     /* the set of requests currently being sent or awaiting a response */
+    /**
+     * 发送出去但是未响应的组件
+     */
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */
@@ -271,6 +280,8 @@ public class NetworkClient implements KafkaClient {
         handleCompletedSends(responses, updatedNow);
         handleCompletedReceives(responses, updatedNow);
         handleDisconnections(responses, updatedNow);
+
+        // 把建立好的连接放到缓存里
         handleConnections();
         handleTimedOutRequests(responses, updatedNow);
 
