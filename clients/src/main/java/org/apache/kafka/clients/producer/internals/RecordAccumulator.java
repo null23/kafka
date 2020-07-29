@@ -356,6 +356,7 @@ public final class RecordAccumulator {
      *     <li>The accumulator has been closed</li>
      * </ul>
      * </ol>
+     * 检查所有的 RecordBatch 队列，看是否有准备就绪可以发送的 RecordBatch
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();

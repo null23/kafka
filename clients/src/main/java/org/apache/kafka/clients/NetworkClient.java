@@ -212,6 +212,7 @@ public class NetworkClient implements KafkaClient {
     public boolean isReady(Node node, long now) {
         // if we need to update our metadata now declare all requests unready to make metadata requests first
         // priority
+        // 没有 正在/将要 加载元数据 &&
         return !metadataUpdater.isUpdateDue(now) && canSendRequest(node.idString());
     }
 
@@ -219,8 +220,10 @@ public class NetworkClient implements KafkaClient {
      * Are we connected and ready and able to send more requests to the given connection?
      *
      * @param node The node
+     * 当前的 client 是否可以给这个 Broker 发送请求
      */
     private boolean canSendRequest(String node) {
+        // 是否已经建立连接 && channel 是否已经就绪 && 是否符合 inFlightRequest 没有响应请求个数的配置（默认是 5 个）
         return connectionStates.isConnected(node) && selector.isChannelReady(node) && inFlightRequests.canSendMore(node);
     }
 
@@ -531,6 +534,9 @@ public class NetworkClient implements KafkaClient {
         }
 
         @Override
+        /**
+         * 是否 正在/将要 加载元数据
+         */
         public boolean isUpdateDue(long now) {
             return !this.metadataFetchInProgress && this.metadata.timeToNextUpdate(now) == 0;
         }

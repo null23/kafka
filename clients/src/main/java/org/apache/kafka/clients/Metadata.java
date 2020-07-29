@@ -126,6 +126,7 @@ public final class Metadata {
 
     /**
      * Request an update of the current cluster metadata info, return the current version before the update
+     * 设置拉取的标志位，异步的拉取元数据
      */
     public synchronized int requestUpdate() {
         this.needUpdate = true;

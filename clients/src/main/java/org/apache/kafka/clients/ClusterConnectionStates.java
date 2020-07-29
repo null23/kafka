@@ -87,9 +87,11 @@ final class ClusterConnectionStates {
 
     /**
      * Return true iff a specific connection is connected
+     * 是否已经和这个 Broker 建立请求
      * @param id The id of the connection to check
      */
     public boolean isConnected(String id) {
+        // 通过内存缓存维护了连接的状态
         NodeConnectionState state = nodeState.get(id);
         return state != null && state.state == ConnectionState.CONNECTED;
     }

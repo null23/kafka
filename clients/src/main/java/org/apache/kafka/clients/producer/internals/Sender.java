@@ -168,20 +168,24 @@ public class Sender implements Runnable {
      * Run a single iteration of sending
      * 
      * @param now
-     *            The current POSIX time in milliseconds
+     * The current POSIX time in milliseconds
      */
     void run(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        // 获取所有的准备就绪的 RecordBatch
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        // 没有获取到元数据的（没有获取到 Leader Partition 信息的）Topic，都要去触发拉取对应的元数据
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
             // topics which may have expired. Add the topic again to metadata to ensure it is included
             // and request metadata update, since there are messages to send to the topic.
             for (String topic : result.unknownLeaderTopics)
                 this.metadata.add(topic);
+
+            // 设置拉取的标志位，之后会异步拉取数据
             this.metadata.requestUpdate();
         }
 
@@ -190,6 +194,8 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            // 判断当前的 Broker 是否已经可以发送 NIO 请求
+            // 条件是，没有正在获取元数据，并且已经建立 TCP 长连接
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));

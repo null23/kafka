@@ -74,26 +74,67 @@ import org.slf4j.LoggerFactory;
  * various getters. These are reset by each call to <code>poll()</code>.
  *
  * This class is not thread safe!
+ *
+ * Kafka 的 Selector 其实就是封装了 Java 原生的 NIO
  */
 public class Selector implements Selectable {
 
     public static final long NO_IDLE_TIMEOUT_MS = -1;
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
 
+    /**
+     * JDK NIO 的 Selector
+     */
     private final java.nio.channels.Selector nioSelector;
+
+    /**
+     * 每个 BrokerId 对应的 Channel
+     */
     private final Map<String, KafkaChannel> channels;
+
+    /**
+     * 已经发送出去的请求
+     */
     private final List<Send> completedSends;
+
+    /**
+     * 已经收到的，并且已经被处理完的响应
+     */
     private final List<NetworkReceive> completedReceives;
+
+    /**
+     * 已经收到的，但是还没被处理的响应
+     */
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
+
+    /**
+     * Java NIO 的那个 Key
+     */
     private final Set<SelectionKey> immediatelyConnectedKeys;
+
+    /**
+     * 断开连接的 BrokerId 集合
+     */
     private final List<String> disconnected;
+
+    /**
+     * 已经建立连接的 BrokerId 集合
+     */
     private final List<String> connected;
+
+    /**
+     * 发送请求失败的 BrokerId 集合
+     */
     private final List<String> failedSends;
     private final Time time;
     private final SelectorMetrics sensors;
     private final String metricGrpPrefix;
     private final Map<String, String> metricTags;
     private final ChannelBuilder channelBuilder;
+
+    /**
+     * 最多可以接受数据量的大小
+     */
     private final int maxReceiveSize;
     private final boolean metricsPerConnection;
     private final IdleExpiryManager idleExpiryManager;
@@ -499,6 +540,7 @@ public class Selector implements Selectable {
 
     /**
      * check if channel is ready
+     * Broker 和 Client 交互的 channel 是否就绪
      */
     @Override
     public boolean isChannelReady(String id) {
@@ -741,6 +783,10 @@ public class Selector implements Selectable {
     // helper class for tracking least recently used connections to enable idle connection closing
     private static class IdleExpiryManager {
         private final Map<String, Long> lruConnections;
+
+        /**
+         * 一个长连接最多可以空闲多久
+         */
         private final long connectionsMaxIdleNanos;
         private long nextIdleCloseCheckTime;
 
