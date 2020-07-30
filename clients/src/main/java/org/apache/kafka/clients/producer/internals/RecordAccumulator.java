@@ -248,11 +248,16 @@ public final class RecordAccumulator {
                     free.deallocate(buffer);
                     return appendResult;
                 }
+                // 把 ByteBuffer 封装进 MemoryRecords 里
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
+
+                // 把 MemoryRecords 封装进 RecordBatch 里
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
 
                 dq.addLast(batch);
+
+                // 未被 Sender 线程拉取到的 RecordBatch
                 incomplete.add(batch);
                 return new RecordAppendResult(future, dq.size() > 1 || batch.records.isFull(), true);
             }

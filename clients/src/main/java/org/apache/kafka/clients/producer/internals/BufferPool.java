@@ -55,7 +55,7 @@ public final class BufferPool {
 
     /**
      * Create a new buffer pool
-     * 
+     *
      * @param memory The maximum amount of memory that this buffer pool can allocate
      * @param poolableSize The buffer size to cache in the free list rather than deallocating
      * @param metrics instance of Metrics
@@ -81,7 +81,7 @@ public final class BufferPool {
     /**
      * Allocate a buffer of the given size. This method blocks if there is not enough memory and the buffer pool
      * is configured with blocking mode.
-     * 
+     *
      * @param size The buffer size to allocate in bytes
      * @param maxTimeToBlockMs The maximum time in milliseconds to block for buffer memory to be available
      * @return The buffer
@@ -100,15 +100,18 @@ public final class BufferPool {
                                                + this.totalMemory
                                                + " on memory allocations.");
 
+        // 比 synchronized 更加灵活，并且可以灵活的使用 Condition
         this.lock.lock();
         try {
             // check if we have a free buffer of the right size pooled
+            // 发现 内存池（free 队列） 里有空闲的内存空间
             if (size == poolableSize && !this.free.isEmpty())
                 return this.free.pollFirst();
 
             // now check if the request is immediately satisfiable with the
             // memory on hand or if we need to block
             int freeListSize = this.free.size() * this.poolableSize;
+            // 剩余的内存空间可用，直接申请 availableMemory
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
@@ -116,6 +119,9 @@ public final class BufferPool {
                 this.availableMemory -= size;
                 lock.unlock();
                 return ByteBuffer.allocate(size);
+
+                // 剩余的内存空间不够了，阻塞等待有消息发送出去之后，就有新的内存空间可以用了
+                // 阻塞超时就会抛出异常
             } else {
                 // we are out of memory and will have to block
                 int accumulated = 0;
@@ -200,7 +206,7 @@ public final class BufferPool {
     /**
      * Return buffers to the pool. If they are of the poolable size add them to the free list, otherwise just mark the
      * memory as free.
-     * 
+     *
      * @param buffer The buffer to return
      * @param size The size of the buffer to mark as deallocated, note that this maybe smaller than buffer.capacity
      *             since the buffer may re-allocate itself during in-place compression
