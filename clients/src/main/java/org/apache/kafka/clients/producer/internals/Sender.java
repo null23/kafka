@@ -190,6 +190,7 @@ public class Sender implements Runnable {
         }
 
         // remove any nodes we aren't ready to send to
+        // 移除没有准备好的 Broker，这种一般是 Broker 对应的 RecordBatch 满足发送数据的条件，但是 Client 还没有和 Broker 建立链接
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {

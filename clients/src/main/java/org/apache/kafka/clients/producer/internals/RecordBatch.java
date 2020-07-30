@@ -34,7 +34,15 @@ public final class RecordBatch {
     private static final Logger log = LoggerFactory.getLogger(RecordBatch.class);
 
     public int recordCount = 0;
+
+    /**
+     * RecordBatch 的最大大小
+     */
     public int maxRecordSize = 0;
+
+    /**
+     * 是否重试过
+     */
     public volatile int attempts = 0;
     public final long createdMs;
     public long drainedMs;

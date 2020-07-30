@@ -368,6 +368,10 @@ public final class RecordAccumulator {
      * </ul>
      * </ol>
      * 检查所有的 RecordBatch 队列，看是否有准备就绪可以发送的 RecordBatch
+     * 满足的条件：
+     *  1.Broker 对应的 RecordBatch 队列的 size > 1 || 队首元素满了
+     *  2.如果重试发送过，并且到达了重试的时间间隔
+     *  3.消息在缓冲区停留的时间超过了 linger.ms
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();
@@ -388,15 +392,34 @@ public final class RecordAccumulator {
                 } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        // 如果重试过，根据重试的时间间隔判断下是否到了下次重试的时间
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
+
+                        // 距离上一次重试的时间，又等了多久
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
+
+                        // 应该等待的时间
+                        // 如果重试过，就是重试的时间间隔
+                        // 如果没有重试过，就是配置的 linger.ms
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+
+                        // 还要等多久 = 应该等多久 - 已经等了多久
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
+
+                        // RecordBatch 队列是否有 Batch 可以发送
                         boolean full = deque.size() > 1 || batch.records.isFull();
+
+                        // 如果等待的时间 > 应该等的时间
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+
+                        // 是否可以发送
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
+
+                        // 如果可以发送，就把 Broker 加入到 readyNodes 里
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
+
+                            // 如果不可以发送，那就每次按照最小的来设置 nextReadyCheckDelayMs，下次等待 nextReadyCheckDelayMs 就会继续尝试发送
                         } else {
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough
