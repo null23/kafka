@@ -230,15 +230,21 @@ public final class RecordAccumulator {
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
 
             // 申请一块内存空间
+            // 这里可能存在多个线程同时申请到内存空间
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
 
+                // double-check
+                // 之前可能有多个线程申请了内存空间，并且准备创建 RecordBatch，但是只有一个线程创建成功了
+                // 因为这里是线程安全的，在下边创建的 RecordBatch
+                // 因此要在这里 check 下，正常情况下，如果第一个线程第一次进入这里，还是会失败的
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
+                    // 如果发现之前已经有线程创建了 RecordBatch，那么这里就把申请的 ByteBuffer 清空并且放到 BufferPool 的内存池里
                     free.deallocate(buffer);
                     return appendResult;
                 }
