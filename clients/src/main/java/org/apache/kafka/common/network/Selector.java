@@ -300,6 +300,7 @@ public class Selector implements Selectable {
     }
 
     /**
+     * 把将要发送的请求发送到 Selector 上
      * Queue the given request for sending in the subsequent {@link #poll(long)} calls
      * @param send The request to send
      */

@@ -250,6 +250,12 @@ public class NetworkClient implements KafkaClient {
         doSend(request, now);
     }
 
+    /**
+     * 暂存将要发送的请求
+     * 同时暂存到 inFlightRequests 和 selector
+     * @param request 某个 Broker 的请求
+     * @param now
+     */
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
         this.inFlightRequests.add(request);
@@ -277,6 +283,8 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
+
+        // 把发送完的数据加到缓存里
         handleCompletedSends(responses, updatedNow);
         handleCompletedReceives(responses, updatedNow);
         handleDisconnections(responses, updatedNow);
@@ -438,11 +446,15 @@ public class NetworkClient implements KafkaClient {
      *
      * @param responses The list of responses to update
      * @param now The current time
+     * 缓存刚发送完的数据的信息
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
-        // if no response is expected then when the send is completed, return it
+        // 获取到了每个 Broker 发送过的请求，并且遍历
         for (Send send : this.selector.completedSends()) {
+            // 获取到之前在 inFlightRequests 里暂存的 ClientRequest
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
+
+            // 判断是否需要接收响应，如果 acks=0 就不需要，expectResponse 是 Sender 封装 ClientRequest 的时候根据 acks 来判断的
             if (!request.expectResponse()) {
                 this.inFlightRequests.completeLastSent(send.destination());
                 responses.add(new ClientResponse(request, now, false, null));
@@ -503,6 +515,7 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Initiate a connection to the given node
+     * Client 和 Broker 第一次建立长连接
      */
     private void initiateConnect(Node node, long now) {
         String nodeConnectionId = node.idString();

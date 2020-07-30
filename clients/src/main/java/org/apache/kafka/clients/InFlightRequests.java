@@ -26,6 +26,10 @@ import java.util.Map;
 final class InFlightRequests {
 
     private final int maxInFlightRequestsPerConnection;
+
+    /**
+     * 向每个 Broker 发送过的 ClientRequest 队列
+     */
     private final Map<String, Deque<ClientRequest>> requests = new HashMap<>();
 
     public InFlightRequests(int maxInFlightRequestsPerConnection) {

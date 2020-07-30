@@ -47,8 +47,17 @@ public class ProduceRequest extends AbstractRequest {
     private final int timeout;
     private final Map<TopicPartition, ByteBuffer> partitionRecords;
 
+    /**
+     * 封装成 Kafka 的二进制协议定制的格式
+     * @param acks
+     * @param timeout
+     * @param partitionRecords
+     */
     public ProduceRequest(short acks, int timeout, Map<TopicPartition, ByteBuffer> partitionRecords) {
+        // 先放了个 ApiKey 的版本号
         super(new Struct(CURRENT_SCHEMA));
+
+        // <Topic, <Partition, ByteBuffer>>
         Map<String, Map<Integer, ByteBuffer>> recordsByTopic = CollectionUtils.groupDataByTopic(partitionRecords);
         struct.set(ACKS_KEY_NAME, acks);
         struct.set(TIMEOUT_KEY_NAME, timeout);
