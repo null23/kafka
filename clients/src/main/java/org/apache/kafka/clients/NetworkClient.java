@@ -154,6 +154,7 @@ public class NetworkClient implements KafkaClient {
      * @param node The node to check
      * @param now The current timestamp
      * @return True if we are ready to send to the given node
+     * 这里触发了 Client 和 Broker 的连接的建立
      */
     @Override
     public boolean ready(Node node, long now) {

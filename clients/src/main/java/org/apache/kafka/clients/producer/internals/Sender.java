@@ -226,6 +226,7 @@ public class Sender implements Runnable {
         sensors.updateProduceRequestMetrics(batches);
 
         // 把每个 Broker 对应的 List<RecordBatch> 再封装一道
+        // 到这里，所有的 batches 都是就绪的
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -386,6 +387,7 @@ public class Sender implements Runnable {
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());
+        // 封装回调函数
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
