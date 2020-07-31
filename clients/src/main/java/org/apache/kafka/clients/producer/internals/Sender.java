@@ -383,7 +383,10 @@ public class Sender implements Runnable {
             produceRecordsByPartition.put(tp, batch.records.buffer());
             recordsByPartition.put(tp, batch);
         }
+        // 消息体
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
+
+        // 封装 请求头 + 消息体，请求头其实就是包含 Broker 接收到这个请求要干啥，这里的请求头是 PRODUCE，意思就是 Broker 接收来自 Client 发送的数据
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());

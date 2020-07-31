@@ -61,6 +61,8 @@ public class ProduceRequest extends AbstractRequest {
         Map<String, Map<Integer, ByteBuffer>> recordsByTopic = CollectionUtils.groupDataByTopic(partitionRecords);
         struct.set(ACKS_KEY_NAME, acks);
         struct.set(TIMEOUT_KEY_NAME, timeout);
+
+        // 其实这里就是多个 RecordBatch 里的 ByteBuffer 的信息
         List<Struct> topicDatas = new ArrayList<Struct>(recordsByTopic.size());
         for (Map.Entry<String, Map<Integer, ByteBuffer>> entry : recordsByTopic.entrySet()) {
             Struct topicData = struct.instance(TOPIC_DATA_KEY_NAME);

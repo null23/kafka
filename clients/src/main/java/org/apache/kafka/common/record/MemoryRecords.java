@@ -112,6 +112,8 @@ public class MemoryRecords implements Records {
      * @return crc of the record
      *
      * 基于 Kafka 定义的二进制协议，把消息的数据写入 ByteBuffer
+     * 二进制协议的格式
+     *  offset | size |
      */
     public long append(long offset, long timestamp, byte[] key, byte[] value) {
         if (!writable)

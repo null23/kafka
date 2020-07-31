@@ -242,17 +242,18 @@ public class Selector implements Selectable {
             throw e;
         }
 
-        // 注册并且监听 OP_CONNECT 事件
+        // 注册并且监听 OP_CONNECT 事件，和 Client 唯一的一个 Selector 绑定
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
 
         // 将 SelectionKey，BrokerId，接收最大大小，封装为一个 KafkaChannel
+        // 一个 KafkaChannel 就可以代表一个连接
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
 
         // attach 之后，可以根据 SelectionKey 获取到一个 KafkaChannel
         key.attach(channel);
         this.channels.put(id, channel);
 
-        // 如果立即连接完毕的话
+        // 如果立即连接完毕的话，如果 Client 和 Broker 在一台机器上的话，一般可以立即连接成功
         if (connected) {
             // OP_CONNECT won't trigger for immediately connected channels
             log.debug("Immediately connected to node {}", channel.id());

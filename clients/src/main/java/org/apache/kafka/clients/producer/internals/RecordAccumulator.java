@@ -271,6 +271,11 @@ public final class RecordAccumulator {
      * resources (like compression streams buffers).
      *
      * 从队尾获取一个 RecordBatch，然后往里写数据
+     * @param timestamp 当前的时间戳
+     * @param key   hash 到固定 partition 的 key
+     * @param value 发送的消息的具体内容
+     * @param callback  回调函数，异步时候用的
+     * @param deque topic 对应的 RecordBatch 队列
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
         // 从队尾获取一个 RecordBatch

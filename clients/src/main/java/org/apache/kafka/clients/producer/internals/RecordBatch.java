@@ -57,6 +57,10 @@ public final class RecordBatch {
     public final ProduceRequestResult produceFuture;
     public long lastAppendTime;
     private final List<Thunk> thunks;
+
+    /**
+     * 每个 Partition 对应的 offset，其实就是这里在维护
+     */
     private long offsetCounter = 0L;
     private boolean retry;
 

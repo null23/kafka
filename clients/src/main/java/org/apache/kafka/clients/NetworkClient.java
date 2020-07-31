@@ -166,6 +166,7 @@ public class NetworkClient implements KafkaClient {
 
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            // Client 申请向 Broker 建立 TCP 连接
             initiateConnect(node, now);
 
         return false;
@@ -516,13 +517,15 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Initiate a connection to the given node
-     * Client 和 Broker 第一次建立长连接
+     * Client 和 Broker 申请向 Broker 建立连接
      */
     private void initiateConnect(Node node, long now) {
         String nodeConnectionId = node.idString();
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
             this.connectionStates.connecting(nodeConnectionId, now);
+
+            // 申请向目标机器建立连接，如果 Broker 同意建立连接，Client 的 Selector 会监听到 OP_ACCEPT 事件的就绪，完成 TCP 三次握手
             selector.connect(nodeConnectionId,
                              new InetSocketAddress(node.host(), node.port()),
                              this.socketSendBuffer,
