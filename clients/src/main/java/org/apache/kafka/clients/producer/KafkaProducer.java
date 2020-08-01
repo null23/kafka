@@ -653,6 +653,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         do {
             log.trace("Requesting metadata update for topic {}.", topic);
             int version = metadata.requestUpdate();
+            // 唤醒 sender 线程，拉取元数据
             sender.wakeup();
             try {
                 metadata.awaitUpdate(version, remainingWaitMs);

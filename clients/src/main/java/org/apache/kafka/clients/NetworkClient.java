@@ -275,6 +275,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
+        // 加载元数据
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             // Kafka 的 Selector 的 poll 方法，对所有的网络相关
