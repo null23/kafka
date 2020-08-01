@@ -244,6 +244,7 @@ public class Sender implements Runnable {
             pollTimeout = 0;
         }
         for (ClientRequest request : requests)
+            // 暂存发送的请求到 inFlightRequests 里，并且通过底层 selector 发送
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;
