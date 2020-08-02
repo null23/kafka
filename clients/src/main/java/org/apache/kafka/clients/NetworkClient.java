@@ -234,7 +234,7 @@ public class NetworkClient implements KafkaClient {
      * 当前的 client 是否可以给这个 Broker 发送请求
      */
     private boolean canSendRequest(String node) {
-        // 是否已经建立连接 && channel 是否已经就绪 && 是否符合 inFlightRequest 没有响应请求个数的配置（默认是 5 个）
+        // 是否已经建立连接 && channel 是否已经就绪 && 有拆包的请求 && 是否符合 inFlightRequest 没有响应请求个数的配置（默认是 5 个）
         return connectionStates.isConnected(node) && selector.isChannelReady(node) && inFlightRequests.canSendMore(node);
     }
 
@@ -254,15 +254,15 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * 暂存将要发送的请求
-     * 同时暂存到 inFlightRequests 和 selector
+     * 同时暂存到 inFlightRequests 和 selector 的 send 里去
      * @param request 某个 Broker 的请求
      * @param now
      */
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
-        // 暂存要发送的请求
+        // 暂存要发送的请求到未响应队列里
         this.inFlightRequests.add(request);
-        // 发送
+        // 暂存发送的请求到 Selector 上
         selector.send(request.request());
     }
 
@@ -293,13 +293,18 @@ public class NetworkClient implements KafkaClient {
         // 把发送完的数据加到缓存里
         handleCompletedSends(responses, updatedNow);
         handleCompletedReceives(responses, updatedNow);
+
+        // 发现某些 Broker 连接断开
         handleDisconnections(responses, updatedNow);
 
         // 把建立好的连接放到缓存里
         handleConnections();
+
+        // 通过 inFlightRequests 来判断请求是否超时
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
+        // 对每个 batch 都调用回调函数
         for (ClientResponse response : responses) {
             if (response.request().hasCallback()) {
                 try {
@@ -456,12 +461,16 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // 获取到了每个 Broker 发送过的请求，并且遍历
+        // 遍历的是多个 Broker  发送的单个的 ClientRequest
+        // 因为同一时间可能有多个 Broker 发送数据，但是每个 Broker 每次 poll 只能发送一个 ClientRequest
         for (Send send : this.selector.completedSends()) {
-            // 获取到之前在 inFlightRequests 里暂存的 ClientRequest
+            // 根据 BrokerId 获取到之前在 inFlightRequests 里暂存的 ClientRequest，其实就是最近一次的
+            // 至于为什么是 lastSent，因为每个 Broker 一次其实只能发送一次请求，然后被缓存起来了
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
 
             // 判断是否需要接收响应，如果 acks=0 就不需要，expectResponse 是 Sender 封装 ClientRequest 的时候根据 acks 来判断的
             if (!request.expectResponse()) {
+                // 如果不需要接收响应，直接把这个请求从 inFlightRequests 的队列里移除出去
                 this.inFlightRequests.completeLastSent(send.destination());
                 responses.add(new ClientResponse(request, now, false, null));
             }
@@ -496,6 +505,7 @@ public class NetworkClient implements KafkaClient {
             processDisconnection(responses, node, now);
         }
         // we got a disconnect so we should probably refresh our metadata and see if that broker is dead
+        // 发现某个 Broker 挂了，重新拉取元数据信息
         if (this.selector.disconnected().size() > 0)
             metadataUpdater.requestUpdate();
     }

@@ -27,8 +27,19 @@ public class NetworkReceive implements Receive {
     public final static int UNLIMITED = -1;
 
     private final String source;
+
+    /**
+     * 4 个字节的 ByteBuffer
+     * 代表了每条消息的大小，用于解决粘包用的
+     * 这里其实会暂存的，解决拆包问题
+     */
     private final ByteBuffer size;
     private final int maxSize;
+
+    /**
+     * 根据 4 个字节的 size 来初始化的
+     * 这里也是会暂存的，解决 响应消息 发生拆包的问题
+     */
     private ByteBuffer buffer;
 
 
@@ -62,11 +73,17 @@ public class NetworkReceive implements Receive {
         return source;
     }
 
+    /**
+     * 如果已经读满了 4 个字节，或者一个响应消息的 buffer 也读满了
+     */
     @Override
     public boolean complete() {
         return !size.hasRemaining() && !buffer.hasRemaining();
     }
 
+    /**
+     * @return 本次读取了多少个字节
+     */
     public long readFrom(ScatteringByteChannel channel) throws IOException {
         return readFromReadableChannel(channel);
     }
@@ -77,12 +94,21 @@ public class NetworkReceive implements Receive {
     @Deprecated
     public long readFromReadableChannel(ReadableByteChannel channel) throws IOException {
         int read = 0;
+
+        // 这里先处理 size 的拆包，如果 size 没读完
         if (size.hasRemaining()) {
+            // 从 channel 中读取 4 个字节的数字，写入到 ByteBuffer 中
+            // 这里就是为了先读出来一条响应的长度
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
+
+            // 如果已经读取到了 4 个字节，也就是解决了拆包的问题
+            // 也就是已经读完了
             if (!size.hasRemaining()) {
+                // 把 position 设置为 0，然后就可以从 ByteBuffer 里继续读取数据了
+                // 转换读写模式
                 size.rewind();
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
@@ -90,9 +116,12 @@ public class NetworkReceive implements Receive {
                 if (maxSize != UNLIMITED && receiveSize > maxSize)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + " larger than " + maxSize + ")");
 
+                // 根据单个响应的大小，初始化一块 ByteBuffer
                 this.buffer = ByteBuffer.allocate(receiveSize);
             }
         }
+
+        // 读取完一条完整的响应
         if (buffer != null) {
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)

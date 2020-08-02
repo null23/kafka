@@ -139,9 +139,16 @@ public class KafkaChannel {
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
+    /**
+     * 读取响应
+     */
     public NetworkReceive read() throws IOException {
         NetworkReceive result = null;
 
+        // 每读取一条响应消息，都会创建一个新的 NetworkReceive
+        // receive 什么时候不为空？就是发生拆包问题的时候，上次响应的数据没读完，然后给暂存起来了
+        // 这次就可以接着上次的 receive 继续往后读
+        // 就比如，size 拆包了，上次只读了 2 个字节，然后，这次就上次暂存的，继续读取 2 个字节
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id);
         }
@@ -155,8 +162,15 @@ public class KafkaChannel {
         return result;
     }
 
+    /**
+     * 发送请求数据，并且清空 Channel 的缓存的 send
+     */
     public Send write() throws IOException {
         Send result = null;
+        // 判断拆包
+        // 如果 send != null，说明上次的请求没有发送完
+        // 如果 !send(send)，说明这次的请求没有发送完
+        // 没有发送完，就从上次的 remaining 继续发送就可以了
         if (send != null && send(send)) {
             result = send;
             send = null;
@@ -164,10 +178,21 @@ public class KafkaChannel {
         return result;
     }
 
+    /**
+     * 会处理拆包问题
+     * @param receive 这里的 receive，可能是新的，也可能是之前发生拆包之后暂存的
+     * @return 读取了多少个字节
+     */
     private long receive(NetworkReceive receive) throws IOException {
         return receive.readFrom(transportLayer);
     }
 
+    /**
+     * 发送暂存的消息
+     * 如果发送完了，取消对 OP_WRITE 事件的关注
+     * 如果没发送完，其实就是粘包和拆包，下次继续发送
+     * @param send  暂存的要发送的数据
+     */
     private boolean send(Send send) throws IOException {
         send.writeTo(transportLayer);
         if (send.completed())

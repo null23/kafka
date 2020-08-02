@@ -87,8 +87,9 @@ final class InFlightRequests {
      * 
      * @param node Node in question
      * @return true iff we have no requests still being sent to the given node
-     * 是否符合配置的 inFlightRequests 的参数规范
-     * 默认是 5 个，也就是不能超过 5 个没有得到响应请求
+     * 主要是判断是否可以继续发送下一个请求，通过两个维度
+     *  1.是否存在拆包的情况
+     *  2.是否不满足配置的 inFlightRequests 的参数配置（默认是 5 个）
      */
     public boolean canSendMore(String node) {
         Deque<ClientRequest> queue = requests.get(node);

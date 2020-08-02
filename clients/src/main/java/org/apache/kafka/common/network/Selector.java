@@ -76,6 +76,7 @@ import org.slf4j.LoggerFactory;
  * This class is not thread safe!
  *
  * Kafka 的 Selector 其实就是封装了 Java 原生的 NIO
+ * 一个 Client 只会有一个 Selector
  */
 public class Selector implements Selectable {
 
@@ -301,7 +302,7 @@ public class Selector implements Selectable {
     }
 
     /**
-     * 把将要发送的请求发送到 Selector 上
+     * 把要发送的请求暂存到 Selector 上
      * Queue the given request for sending in the subsequent {@link #poll(long)} calls
      * @param send The request to send
      */
@@ -384,7 +385,9 @@ public class Selector implements Selectable {
                                    boolean isImmediatelyConnected,
                                    long currentTimeNanos) {
         Iterator<SelectionKey> iterator = selectionKeys.iterator();
+        // 遍历所有 Broker 的就绪事件
         while (iterator.hasNext()) {
+            // 一个 key 代表了一个 Broker 的就绪的事件
             SelectionKey key = iterator.next();
             iterator.remove();
 
@@ -421,16 +424,22 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
+                // 读取响应
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+                    // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
+                    // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取
                     while ((networkReceive = channel.read()) != null)
                         addToStagedReceives(channel, networkReceive);
                 }
 
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
+                // 发送消息
                 if (channel.ready() && key.isWritable()) {
+                    // 通过 SocketChannel 真正的把暂存的请求发送出去
                     Send send = channel.write();
                     if (send != null) {
+                        // 已经发送出去的请求
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }

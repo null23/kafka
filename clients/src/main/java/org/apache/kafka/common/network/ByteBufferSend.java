@@ -25,6 +25,10 @@ public class ByteBufferSend implements Send {
     private final String destination;
     private final int size;
     protected final ByteBuffer[] buffers;
+
+    /**
+     * 还剩多少才能发送完
+     */
     private int remaining;
     private boolean pending = false;
 
@@ -42,6 +46,10 @@ public class ByteBufferSend implements Send {
         return destination;
     }
 
+
+    /**
+     * 如果 remaining = 0，说明肯定发送完了
+     */
     @Override
     public boolean completed() {
         return remaining <= 0 && !pending;
@@ -53,10 +61,15 @@ public class ByteBufferSend implements Send {
     }
 
     @Override
+    /**
+     * 处理拆包的问题
+     */
     public long writeTo(GatheringByteChannel channel) throws IOException {
         long written = channel.write(buffers);
         if (written < 0)
             throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
+
+        // 每次发送多少，直接减去，remaining 就是剩下还有多少没有发送的
         remaining -= written;
         // This is temporary workaround. As Send , Receive interfaces are being used by BlockingChannel.
         // Once BlockingChannel is removed we can make Send, Receive to work with transportLayer rather than

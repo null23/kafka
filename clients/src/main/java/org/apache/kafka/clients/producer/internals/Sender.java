@@ -197,6 +197,7 @@ public class Sender implements Runnable {
             Node node = iter.next();
             // 判断当前的 Broker 是否已经可以发送 NIO 请求
             // 条件是，没有正在获取元数据，并且已经建立 TCP 长连接
+            // 并且没有拆包，并且满足 inFlightRequests 的参数配置
             if (!this.client.ready(node, now)) {
                 // 如果没有建立好连接，就移除 readyNodes
                 iter.remove();

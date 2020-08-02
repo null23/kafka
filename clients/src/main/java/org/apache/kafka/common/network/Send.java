@@ -22,6 +22,7 @@ public interface Send {
 
     /**
      * The numeric id for the destination of this send
+     * BrokerId
      */
     public String destination();
 
