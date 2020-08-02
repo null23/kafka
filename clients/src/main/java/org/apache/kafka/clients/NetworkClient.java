@@ -292,6 +292,8 @@ public class NetworkClient implements KafkaClient {
 
         // 把发送完的数据加到缓存里
         handleCompletedSends(responses, updatedNow);
+
+        // 处理读取完的响应
         handleCompletedReceives(responses, updatedNow);
 
         // 发现某些 Broker 连接断开

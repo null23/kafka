@@ -367,6 +367,7 @@ public class Selector implements Selectable {
             pollSelectionKeys(immediatelyConnectedKeys, true, endSelect);
         }
 
+        // 处理刚才读取完的响应
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
@@ -424,12 +425,15 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
-                // 读取响应
+                // 读取响应，必须是没有 stagedReceives 才行，也就是必须处理完积压的响应消息
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
                     // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
                     // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取
                     while ((networkReceive = channel.read()) != null)
+                        // 只有完整读取完了一条响应，才会把响应的结果添加到 stagedReceives 里去
+                        // 如果一次 OP_READ 事件，socket 缓冲区里对应了多条响应，就会创建多个 NetworkReceive 对象，放到 stagedReceives
+                        // 假如有一条没读完，那就暂存起来，下一次 poll 操作继续处理，直到一条响应完全读取完了才能放到 stagedReceives
                         addToStagedReceives(channel, networkReceive);
                 }
 
@@ -661,6 +665,8 @@ public class Selector implements Selectable {
 
     /**
      * checks if there are any staged receives and adds to completedReceives
+     * 处理刚才读取完的响应
+     * 如果一次读取出来多个响应消息，在这里仅仅只会把每个连接的第一个响应消息放进 completedReceives
      */
     private void addToCompletedReceives() {
         if (!this.stagedReceives.isEmpty()) {
