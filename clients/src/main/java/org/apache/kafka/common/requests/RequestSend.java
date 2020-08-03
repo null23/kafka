@@ -19,6 +19,7 @@ import org.apache.kafka.common.protocol.types.Struct;
 
 /**
  * A send object for a kafka request
+ * 封装了请求头和请求体
  */
 public class RequestSend extends NetworkSend {
 

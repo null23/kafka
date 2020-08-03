@@ -18,6 +18,8 @@ package org.apache.kafka.common.protocol;
 
 /**
  * Identifiers for all the Kafka APIs
+ * 封装了一系列 Client 和 Broker 交互的操作
+ * Broker 在接收到请求之后，根据 ApiKey 对应的操作，对请求的数据进行处理
  */
 public enum ApiKeys {
     PRODUCE(0, "Produce"),

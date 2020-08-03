@@ -382,6 +382,9 @@ public class NetworkClient implements KafkaClient {
      * existing connection and from which we have disconnected within the reconnect backoff period.
      *
      * @return The node with the fewest in-flight requests.
+     *
+     * 选择一个负载最轻的 Broker，等下拉取元数据的时候，就用这个负载最轻的 Broker
+     * 如何判断一个 Broker 的负载是否大？通过 inFlightRequests 的个数来判断，从一个随机的 index 之后遍历所有的 Node，找到一个 inFlightsRequest 最小的
      */
     @Override
     public Node leastLoadedNode(long now) {
@@ -577,14 +580,17 @@ public class NetworkClient implements KafkaClient {
             return metadata.fetch().nodes();
         }
 
-        @Override
         /**
          * 是否 正在/将要 加载元数据
          */
+        @Override
         public boolean isUpdateDue(long now) {
             return !this.metadataFetchInProgress && this.metadata.timeToNextUpdate(now) == 0;
         }
 
+        /**
+         * 请求加载元数据
+         */
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
@@ -598,7 +604,11 @@ public class NetworkClient implements KafkaClient {
             if (metadataTimeout == 0) {
                 // Beware that the behavior of this method and the computation of timeouts for poll() are
                 // highly dependent on the behavior of leastLoadedNode.
+
+                // 找到一个 inFlightRequests 最小的 Node
                 Node node = leastLoadedNode(now);
+
+                // 尝试拉取元数据信息
                 maybeUpdate(now, node);
             }
 
@@ -661,6 +671,7 @@ public class NetworkClient implements KafkaClient {
 
         /**
          * Create a metadata request for the given topics
+         * 创建一个获取元数据的请求 ClientRequest
          */
         private ClientRequest request(long now, String node, MetadataRequest metadata) {
             RequestSend send = new RequestSend(node, nextRequestHeader(ApiKeys.METADATA), metadata.toStruct());
@@ -669,6 +680,10 @@ public class NetworkClient implements KafkaClient {
 
         /**
          * Add a metadata request to the list of sends if we can make one
+         *
+         * 尝试拉取元数据信息
+         * @param now 现在的时间
+         * @param node  刚才根据最少的 inFlightRequest 选出来的最少的 Broker 节点
          */
         private void maybeUpdate(long now, Node node) {
             if (node == null) {
@@ -686,8 +701,12 @@ public class NetworkClient implements KafkaClient {
                     metadataRequest = MetadataRequest.allTopics();
                 else
                     metadataRequest = new MetadataRequest(new ArrayList<>(metadata.topics()));
+
+                // 为 元数据拉取请求 封装一个 ClientRequest
                 ClientRequest clientRequest = request(now, nodeConnectionId, metadataRequest);
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node.id());
+
+                // 发送数据
                 doSend(clientRequest, now);
             } else if (connectionStates.canConnect(nodeConnectionId, now)) {
                 // we don't have a connection to this node right now, make one
