@@ -299,6 +299,7 @@ public final class RecordAccumulator {
     /**
      * Abort the batches that have been sitting in RecordAccumulator for more than the configured requestTimeout
      * due to metadata being unavailable
+     * 处理超时的 batch
      */
     public List<RecordBatch> abortExpiredBatches(int requestTimeout, long now) {
         List<RecordBatch> expiredBatches = new ArrayList<>();
@@ -340,6 +341,7 @@ public final class RecordAccumulator {
 
     /**
      * Re-enqueue the given record batch in the accumulator to retry
+     * 出现异常的发送请求，重新加入缓冲区进行处理，并且设置重试次数等相关参数
      */
     public void reenqueue(RecordBatch batch, long now) {
         batch.attempts++;

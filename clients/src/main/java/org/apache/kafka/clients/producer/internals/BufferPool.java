@@ -44,6 +44,12 @@ import org.apache.kafka.common.utils.Time;
 public final class BufferPool {
 
     private final long totalMemory;
+
+    /**
+     * 内存池的资源大小
+     * 主要是用于快速创建/回收内存资源的
+     * 初始化 BufferPool 的时候默认是 batchSize
+     */
     private final int poolableSize;
     private final ReentrantLock lock;
     private final Deque<ByteBuffer> free;
@@ -210,16 +216,23 @@ public final class BufferPool {
      * @param buffer The buffer to return
      * @param size The size of the buffer to mark as deallocated, note that this maybe smaller than buffer.capacity
      *             since the buffer may re-allocate itself during in-place compression
+     * 释放内存块，并且唤醒因为内存不够(availableMemory)而阻塞的线程
      */
     public void deallocate(ByteBuffer buffer, int size) {
         lock.lock();
         try {
+            // 释放内存块，并且把内存块加入到内存池里
+            // 正常的都会走这个逻辑，因为正常一条消息的大小肯定小于 poolableSize（默认是 batchSuze）
+            // 这里其实主要判断的是 poolableSize，poolableSize 默认就是 batch Size，poolableSize 以下的都是可以随便使用的 内存池 的资源
             if (size == this.poolableSize && size == buffer.capacity()) {
                 buffer.clear();
                 this.free.add(buffer);
+
+                // 大于 poolableSize 意思就是超过了可分配的资源
             } else {
                 this.availableMemory += size;
             }
+            // 唤醒因为内存不够(availableMemory)而阻塞的线程
             Condition moreMem = this.waiters.peekFirst();
             if (moreMem != null)
                 moreMem.signal();

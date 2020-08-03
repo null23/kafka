@@ -293,7 +293,7 @@ public class NetworkClient implements KafkaClient {
         // 把发送完的数据加到缓存里
         handleCompletedSends(responses, updatedNow);
 
-        // 处理读取完的响应
+        // 处理读取完的响应，对二进制字节数组进行解析
         handleCompletedReceives(responses, updatedNow);
 
         // 发现某些 Broker 连接断开
@@ -410,12 +410,17 @@ public class NetworkClient implements KafkaClient {
         return found;
     }
 
+    /**
+     * 对响应的二进制的字节数组进行解析
+     */
     public static Struct parseResponse(ByteBuffer responseBuffer, RequestHeader requestHeader) {
         ResponseHeader responseHeader = ResponseHeader.parse(responseBuffer);
         // Always expect the response version id to be the same as the request version id
         short apiKey = requestHeader.apiKey();
         short apiVer = requestHeader.apiVersion();
         Struct responseBody = ProtoUtils.responseSchema(apiKey, apiVer).read(responseBuffer);
+
+        // 校验请求和响应是否关联
         correlate(requestHeader, responseHeader);
         return responseBody;
     }
@@ -442,9 +447,12 @@ public class NetworkClient implements KafkaClient {
      *
      * @param responses The list of responses to update
      * @param now The current time
+     * 处理超时的响应，做很多内存数据结构的清理
      */
     private void handleTimedOutRequests(List<ClientResponse> responses, long now) {
+        // 根据 inFlightRequests 获取所有超时的 Broker
         List<String> nodeIds = this.inFlightRequests.getNodesWithTimedOutRequests(now, this.requestTimeoutMs);
+        // 超过 60s 还没响应，认为 Broker 宕机了，都给清理掉
         for (String nodeId : nodeIds) {
             // close connection to the node
             this.selector.close(nodeId);
@@ -487,12 +495,20 @@ public class NetworkClient implements KafkaClient {
      *
      * @param responses The list of responses to update
      * @param now The current time
+     *
+     * 解析二进制的响应信息
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         for (NetworkReceive receive : this.selector.completedReceives()) {
             String source = receive.source();
+
+            // 每个 Broker 只会处理最先发送的那个请求所对应的响应
             ClientRequest req = inFlightRequests.completeNext(source);
+
+            // 解析二进制的 Byte 数组
             Struct body = parseResponse(receive.payload(), req.request().header());
+
+            // 获取的响应是不是元数据
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
                 responses.add(new ClientResponse(req, now, false, body));
         }
@@ -527,8 +543,10 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Validate that the response corresponds to the request we expect or else explode
+     * 校验请求和响应是否关联
      */
     private static void correlate(RequestHeader requestHeader, ResponseHeader responseHeader) {
+        // correlationId 是 Kafka Producer 初始化 NetworkClient 的时候初始化的，初始值是 0，每发送一条消息就递增
         if (requestHeader.correlationId() != responseHeader.correlationId())
             throw new IllegalStateException("Correlation id for response (" + responseHeader.correlationId()
                     + ") does not match request (" + requestHeader.correlationId() + "), request header: " + requestHeader);

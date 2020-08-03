@@ -219,6 +219,7 @@ public class Sender implements Runnable {
             }
         }
 
+        // 处理超时的 batch
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
@@ -276,9 +277,11 @@ public class Sender implements Runnable {
 
     /**
      * Handle a produce response
+     * 根据响应的结果调用回调函数
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
+        // 连接断开了
         if (response.wasDisconnected()) {
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
@@ -321,6 +324,8 @@ public class Sender implements Runnable {
      * @param now The current POSIX time stamp in milliseconds
      */
     private void completeBatch(RecordBatch batch, Errors error, long baseOffset, long timestamp, long correlationId, long now) {
+        // 有异常，看情况进行重试
+        // canRetry 是看，是否可以进行重试，假如对应的 Leader Partition 都挂了，那还咋重试啊
         if (error != Errors.NONE && canRetry(batch, error)) {
             // retry
             log.warn("Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",
@@ -328,6 +333,7 @@ public class Sender implements Runnable {
                      batch.topicPartition,
                      this.retries - batch.attempts - 1,
                      error);
+            // 把 RecordBatch 重新加入缓冲区里，并且在 RecordAccumulator 记录重试次数等重试相关的信息
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
         } else {
@@ -338,10 +344,13 @@ public class Sender implements Runnable {
                 exception = error.exception();
             // tell the user the result of their request
             batch.done(baseOffset, timestamp, exception);
+
+            // 释放内存资源
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
         }
+        // 如果属于这种情况，重新拉取元数据
         if (error.exception() instanceof InvalidMetadataException) {
             if (error.exception() instanceof UnknownTopicOrPartitionException)
                 log.warn("Received unknown topic or partition error in produce request on partition {}. The " +
@@ -356,6 +365,8 @@ public class Sender implements Runnable {
 
     /**
      * We can retry a send if the error is transient and the number of attempts taken is fewer than the maximum allowed
+     * 判断出现的异常是否是可重试的
+     * 比如 Broker 都挂了，这显然是无法重试的
      */
     private boolean canRetry(RecordBatch batch, Errors error) {
         return batch.attempts < this.retries && error.exception() instanceof RetriableException;
