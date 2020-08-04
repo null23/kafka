@@ -277,7 +277,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
-        // 加载元数据
+        // 加载元数据，如果 needUpdate 标志位为 true，会立即拉取元数据
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             // Kafka 的 Selector 的 poll 方法，对所有的网络相关
@@ -612,6 +612,7 @@ public class NetworkClient implements KafkaClient {
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
+            // 下次拉取元数据的时间，如果 needUpdate 标志位为 true，则 timeToNextMetadataUpdate = 0
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
             long waitForMetadataFetch = this.metadataFetchInProgress ? Integer.MAX_VALUE : 0;
