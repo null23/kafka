@@ -268,8 +268,11 @@ public class Selector implements Selectable {
      * Register the nioSelector with an existing channel
      * Use this on server-side, when a connection is accepted by a different thread but processed by the Selector
      * Note that we are not checking if the connection id is valid - since the connection already exists
+     *
+     * 关注 OP_READ 事件，并且封装了一套 NIO 的 API
      */
     public void register(String id, SocketChannel socketChannel) throws ClosedChannelException {
+        // Kafka 统一的封装了一套 NIO 的 API
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_READ);
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
         key.attach(channel);
@@ -368,6 +371,7 @@ public class Selector implements Selectable {
         }
 
         // 处理刚才读取完的响应
+        // 其实就是对刚才从保存了二进制数据的 ByteBuffer 的 NetworkReceive 进行处理
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
@@ -431,6 +435,7 @@ public class Selector implements Selectable {
                     // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
                     // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取
                     while ((networkReceive = channel.read()) != null)
+                        // stagedReceives 里保存的都是对粘包拆包处理完的 ByteBuffer，这些 ByteBuffer 被封装到了 NetworkReceive 里去
                         // 只有完整读取完了一条响应，才会把响应的结果添加到 stagedReceives 里去
                         // 如果一次 OP_READ 事件，socket 缓冲区里对应了多条响应，就会创建多个 NetworkReceive 对象，放到 stagedReceives
                         // 假如有一条没读完，那就暂存起来，下一次 poll 操作继续处理，直到一条响应完全读取完了才能放到 stagedReceives

@@ -244,6 +244,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, adminManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers, clusterId)
 
+        // 处理请求的工作线程
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, config.numIoThreads)
 
         Mx4jLoader.maybeLoad()

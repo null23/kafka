@@ -20,6 +20,8 @@ import java.nio.channels.ScatteringByteChannel;
 
 /**
  * A size delimited Receive that consists of a 4 byte network-ordered size N followed by N bytes of content
+ * 这里其实就是对响应中的二进制数据进行读取
+ * 把读取到的 二进制数据 放入 ByteBuffer 里，等待后续的对 二进制数据 的解析
  */
 public class NetworkReceive implements Receive {
 

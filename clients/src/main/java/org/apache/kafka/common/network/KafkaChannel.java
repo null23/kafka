@@ -140,7 +140,7 @@ public class KafkaChannel {
     }
 
     /**
-     * 读取响应
+     * 读取响应，后续会处理粘包和拆包
      */
     public NetworkReceive read() throws IOException {
         NetworkReceive result = null;
@@ -153,6 +153,7 @@ public class KafkaChannel {
             receive = new NetworkReceive(maxReceiveSize, id);
         }
 
+        // 处理粘包拆包
         receive(receive);
         if (receive.complete()) {
             receive.payload().rewind();

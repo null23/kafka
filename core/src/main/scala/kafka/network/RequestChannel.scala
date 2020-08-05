@@ -182,6 +182,10 @@ object RequestChannel extends Logging {
 
 class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMetricsGroup {
   private var responseListeners: List[(Int) => Unit] = Nil
+
+  /**
+    * 响应队列，是一个有界阻塞队列，队列大小默认是 500
+    */
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
   private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
   for(i <- 0 until numProcessors)
@@ -207,7 +211,10 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
     )
   }
 
-  /** Send a request to be handled, potentially blocking until there is room in the queue for the request */
+  /**
+    * Send a request to be handled, potentially blocking until there is room in the queue for the request
+    * 把 Processor 线程解析完的请求放进响应队列里，等待后续比如 IO 线程的处理？？？
+    * */
   def sendRequest(request: RequestChannel.Request) {
     requestQueue.put(request)
   }

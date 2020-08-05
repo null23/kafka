@@ -64,6 +64,7 @@ object Kafka extends Logging {
         }
       })
 
+      // 初始化 KafkaServer 的入口
       kafkaServerStartable.startup
       kafkaServerStartable.awaitShutdown
     }
