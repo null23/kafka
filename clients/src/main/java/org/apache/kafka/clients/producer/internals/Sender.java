@@ -245,9 +245,10 @@ public class Sender implements Runnable {
             // 如果有就绪的 RecordBatch，就直接把 pollTimeout 设置为 0
             pollTimeout = 0;
         }
+        // requests 对应了要发送给所有 Broker 的数据
         for (ClientRequest request : requests)
             // 暂存发送的请求到 inFlightRequests 里，并且通过底层 selector 发送
-            // todo 这里的 send 不会被覆盖吗
+            // todo 这里的 send 不会被覆盖吗，为啥啊
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;
