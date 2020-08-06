@@ -430,15 +430,16 @@ public class Selector implements Selectable {
 
                 /* if channel is ready read from any connections that have readable data */
                 // 读取响应，必须是没有 stagedReceives 才行，也就是必须处理完积压的响应消息
+                // todo 那这里就有个问题了，socket 缓冲区可能长期保持 READABLE 的状态？然后一直写入，导致 socket 缓冲区满了？
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
                     // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
-                    // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取
+                    // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取，也就是会读取出多个 NetworkReceive
                     while ((networkReceive = channel.read()) != null)
                         // stagedReceives 里保存的都是对粘包拆包处理完的 ByteBuffer，这些 ByteBuffer 被封装到了 NetworkReceive 里去
                         // 只有完整读取完了一条响应，才会把响应的结果添加到 stagedReceives 里去
                         // 如果一次 OP_READ 事件，socket 缓冲区里对应了多条响应，就会创建多个 NetworkReceive 对象，放到 stagedReceives
-                        // 假如有一条没读完，那就暂存起来，下一次 poll 操作继续处理，直到一条响应完全读取完了才能放到 stagedReceives
+                        // 假如最后一条没读完，那就暂存起来，下一次 poll 操作继续处理，直到一条响应完全读取完了才能放到 stagedReceives
                         addToStagedReceives(channel, networkReceive);
                 }
 
@@ -446,6 +447,7 @@ public class Selector implements Selectable {
                 // 发送消息
                 if (channel.ready() && key.isWritable()) {
                     // 通过 SocketChannel 真正的把暂存的请求发送出去
+                    // 这里暂存的 Send，里边封装了 Client
                     Send send = channel.write();
                     if (send != null) {
                         // 已经发送出去的请求
@@ -672,14 +674,17 @@ public class Selector implements Selectable {
      * checks if there are any staged receives and adds to completedReceives
      * 处理刚才读取完的响应
      * 如果一次读取出来多个响应消息，在这里仅仅只会把每个连接的第一个响应消息放进 completedReceives
+     * todo 即使是多个 Partition 的响应，也只是取第一个 Partition 的响应进行处理？
      */
     private void addToCompletedReceives() {
         if (!this.stagedReceives.isEmpty()) {
+            // 遍历每个 Entry，也就是以 Broker 维度来遍历的
             Iterator<Map.Entry<KafkaChannel, Deque<NetworkReceive>>> iter = this.stagedReceives.entrySet().iterator();
             while (iter.hasNext()) {
                 Map.Entry<KafkaChannel, Deque<NetworkReceive>> entry = iter.next();
                 KafkaChannel channel = entry.getKey();
                 if (!channel.isMute()) {
+                    // 取出每个 Broker 对应的 响应队列 里的第一个 响应
                     Deque<NetworkReceive> deque = entry.getValue();
                     NetworkReceive networkReceive = deque.poll();
                     this.completedReceives.add(networkReceive);

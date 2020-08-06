@@ -318,6 +318,7 @@ class ReplicaManager(val config: KafkaConfig,
   /**
    * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
    * the callback function will be triggered either when timeout or the required acks are satisfied
+    * 将消息写入磁盘
    */
   def appendMessages(timeout: Long,
                      requiredAcks: Short,
@@ -363,6 +364,8 @@ class ReplicaManager(val config: KafkaConfig,
           topicAndPartition -> new PartitionResponse(Errors.INVALID_REQUIRED_ACKS.code,
             LogAppendInfo.UnknownLogAppendInfo.firstOffset, Message.NoTimestamp)
       }
+
+      // 调用回调函数
       responseCallback(responseStatus)
     }
   }

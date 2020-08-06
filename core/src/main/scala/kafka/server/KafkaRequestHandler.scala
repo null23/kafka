@@ -26,11 +26,13 @@ import org.apache.kafka.common.utils.Utils
 
 /**
  * A thread that answers kafka requests.
+  * 处理请求的 IO 线程
  */
 class KafkaRequestHandler(id: Int,
                           brokerId: Int,
                           val aggregateIdleMeter: Meter,
                           val totalHandlerThreads: Int,
+                         // 注意，这里并不是每个 Processor 线程都有自己的 RequestChannel，仅仅是获取了引用
                           val requestChannel: RequestChannel,
                           apis: KafkaApis) extends Runnable with Logging {
   this.logIdent = "[Kafka Request Handler " + id + " on Broker " + brokerId + "], "
@@ -57,6 +59,8 @@ class KafkaRequestHandler(id: Int,
         }
         req.requestDequeueTimeMs = SystemTime.milliseconds
         trace("Kafka request handler %d on broker %d handling request %s".format(id, brokerId, req))
+
+        // 根据请求的类型处理请求
         apis.handle(req)
       } catch {
         case e: Throwable => error("Exception when handling request", e)
@@ -67,6 +71,13 @@ class KafkaRequestHandler(id: Int,
   def shutdown(): Unit = requestChannel.sendRequest(RequestChannel.AllDone)
 }
 
+/**
+  * 处理请求的线程池
+  * @param brokerId 当前 BrokerId
+  * @param requestChannel 封装了请求队列
+  * @param apis 各种请求的操作
+  * @param numThreads 处理响应的线程的数量，就是配置的 IO 线程的数量
+  */
 class KafkaRequestHandlerPool(val brokerId: Int,
                               val requestChannel: RequestChannel,
                               val apis: KafkaApis,
@@ -76,8 +87,20 @@ class KafkaRequestHandlerPool(val brokerId: Int,
   private val aggregateIdleMeter = newMeter("RequestHandlerAvgIdlePercent", "percent", TimeUnit.NANOSECONDS)
 
   this.logIdent = "[Kafka Request Handler on Broker " + brokerId + "], "
+
+  /**
+    * 维护多个 IO Thread
+    */
   val threads = new Array[Thread](numThreads)
+
+  /**
+    * 维护多个 IO 线程，KafkaRequestHandler 就是 IO 线程
+    */
   val runnables = new Array[KafkaRequestHandler](numThreads)
+
+  /**
+    * 根据 IO 线程的数量创建并且运行 IO 线程
+    */
   for(i <- 0 until numThreads) {
     runnables(i) = new KafkaRequestHandler(i, brokerId, aggregateIdleMeter, numThreads, requestChannel, apis)
     threads(i) = Utils.daemonThread("kafka-request-handler-" + i, runnables(i))

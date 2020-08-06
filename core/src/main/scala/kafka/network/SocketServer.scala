@@ -485,6 +485,7 @@ private[kafka] class Processor(val id: Int,
         poll()
 
         // 对已经接受完毕的请求进行处理
+        // 每次只处理一个请求
         processCompletedReceives()
 
         // 对已经发送完毕的响应进行处理
@@ -508,7 +509,9 @@ private[kafka] class Processor(val id: Int,
     shutdownComplete()
   }
 
+  // 处理 响应队列 里的响应
   private def processNewResponses() {
+    // 根据 Processor 线程的 id，从 RequestChannel 获取该 Processor 线程对应的 Response 进行处理
     var curr = requestChannel.receiveResponse(id)
     while (curr != null) {
       try {
@@ -520,6 +523,7 @@ private[kafka] class Processor(val id: Int,
             trace("Socket server received empty response to send, registering for read: " + curr)
             selector.unmute(curr.request.connectionId)
           case RequestChannel.SendAction =>
+            // 发送响应
             sendResponse(curr)
           case RequestChannel.CloseConnectionAction =>
             curr.request.updateRequestMetrics
@@ -533,6 +537,7 @@ private[kafka] class Processor(val id: Int,
   }
 
   /* `protected` for test usage */
+  // 发送响应
   protected[network] def sendResponse(response: RequestChannel.Response) {
     trace(s"Socket server received response to send, registering for write and sending data: $response")
     val channel = selector.channel(response.responseSend.destination)
@@ -542,7 +547,9 @@ private[kafka] class Processor(val id: Int,
       response.request.updateRequestMetrics()
     }
     else {
+      // 和 Producer 那里一样了
       selector.send(response.responseSend)
+      // 准备发送的 Response
       inflightResponses += (response.request.connectionId -> response)
     }
   }
@@ -563,6 +570,7 @@ private[kafka] class Processor(val id: Int,
     * 其实就是和 Producer 一样，处理解析完成的 NetworkReceive，把解析完成的 Network
     */
   private def processCompletedReceives() {
+    // completedReceives 封装了来自每个客户端的一个请求
     selector.completedReceives.asScala.foreach { receive =>
       try {
         val channel = selector.channel(receive.source)
@@ -570,8 +578,10 @@ private[kafka] class Processor(val id: Int,
           channel.socketAddress)
         val req = RequestChannel.Request(processor = id, connectionId = receive.source, session = session, buffer = receive.payload, startTimeMs = time.milliseconds, securityProtocol = protocol)
 
-        // 这里是核心，把响应维护成一个 Request，放进响应队列里，等待后续的比如 IO 线程进行处理？
+        // 把请求放进请求队列，等待后续处理
         requestChannel.sendRequest(req)
+
+        // 取消对 OP_READ 事件的关注，因为刚才已经读取过请求了，监听过 OP_READ 事件
         selector.mute(receive.source)
       } catch {
         case e @ (_: InvalidRequestException | _: SchemaException) =>

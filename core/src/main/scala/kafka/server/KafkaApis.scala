@@ -69,12 +69,14 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Top-level method that handles all requests and multiplexes to the right api
+    * 处理请求
    */
   def handle(request: RequestChannel.Request) {
     try {
       trace("Handling request:%s from connection %s;securityProtocol:%s,principal:%s".
         format(request.requestDesc(true), request.connectionId, request.securityProtocol, request.session.principal))
       ApiKeys.forId(request.requestId) match {
+        // 处理来自 Producer 发送消息的请求
         case ApiKeys.PRODUCE => handleProducerRequest(request)
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
@@ -345,6 +347,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Handle a produce request
+    * 处理来自 Producer 发送消息的请求
    */
   def handleProducerRequest(request: RequestChannel.Request) {
     val produceRequest = request.body.asInstanceOf[ProduceRequest]
@@ -359,6 +362,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     // the callback for sending a produce response
+    // 设置回调函数，每个分区都对应了一个结果（因为发送过来的 ClientRequest 其实就是包含了多个 Partition 的数据的）
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
 
       val mergedResponseStatus = responseStatus ++ 
@@ -380,7 +384,9 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
       }
 
+      // 又封装了一个回调函数
       def produceResponseCallback(delayTimeMs: Int) {
+        // 如果 acks = 0，其实啥都不用管
         if (produceRequest.acks == 0) {
           // no operation needed if producer request.required.acks = 0; however, if there is any error in handling
           // the request, since no response is expected by the producer, the server will close socket server so that
@@ -398,7 +404,10 @@ class KafkaApis(val requestChannel: RequestChannel,
           } else {
             requestChannel.noOperation(request.processor, request)
           }
+
+          // 这里是正常情况，如果 acks = 1
         } else {
+          // 针对每个分区都封装一个处理结果
           val respHeader = new ResponseHeader(request.header.correlationId)
           val respBody = request.header.apiVersion match {
             case 0 => new ProduceResponse(mergedResponseStatus.asJava)
@@ -408,6 +417,7 @@ class KafkaApis(val requestChannel: RequestChannel,
             case version => throw new IllegalArgumentException(s"Version `$version` of ProduceRequest is not handled. Code must be updated.")
           }
 
+          // 把结果放入 RequestChannel 里
           requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, respHeader, respBody)))
         }
       }
@@ -415,6 +425,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       // When this callback is triggered, the remote API call has completed
       request.apiRemoteCompleteTimeMs = SystemTime.milliseconds
 
+      // 调用了 produceResponseCallback 这个回调函数
       quotas.produce.recordAndMaybeThrottle(
         request.session.sanitizedUser,
         request.header.clientId,
@@ -433,11 +444,14 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       // call the replica manager to append messages to the replicas
+      // ReplicaManager 将消息写入副本中（其实就是把消息写入磁盘），并且调用回调函数
       replicaManager.appendMessages(
         produceRequest.timeout.toLong,
         produceRequest.acks,
         internalTopicsAllowed,
         authorizedMessagesPerPartition,
+
+        // 刚才封装的回调函数
         sendResponseCallback)
 
       // if the request is put into the purgatory, it will have a held reference

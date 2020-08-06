@@ -247,6 +247,7 @@ public class Sender implements Runnable {
         }
         for (ClientRequest request : requests)
             // 暂存发送的请求到 inFlightRequests 里，并且通过底层 selector 发送
+            // todo 这里的 send 不会被覆盖吗
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;

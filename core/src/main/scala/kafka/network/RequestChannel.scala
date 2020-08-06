@@ -184,9 +184,15 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   private var responseListeners: List[(Int) => Unit] = Nil
 
   /**
-    * 响应队列，是一个有界阻塞队列，队列大小默认是 500
+    * 请求队列，封装了被解析后的请求，是一个有界阻塞队列，队列大小默认是 500
+    * 等待 IO 线程拉取
     */
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
+
+  /**
+    * 响应队列，封装了请求处理完之后，返回给客户端的响应
+    * 每个 Processor 线程都有一个 ResponseQueue
+    */
   private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
   for(i <- 0 until numProcessors)
     responseQueues(i) = new LinkedBlockingQueue[RequestChannel.Response]()

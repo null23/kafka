@@ -379,6 +379,8 @@ public final class RecordAccumulator {
      *  1.Broker 对应的 RecordBatch 队列的 size > 1 || 队首元素满了
      *  2.如果重试发送过，并且到达了重试的时间间隔
      *  3.消息在缓冲区停留的时间超过了 linger.ms
+     *
+     *  针对每个 Partition，每次 ready 最多只会有一个 RecordBatch 就绪
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();
