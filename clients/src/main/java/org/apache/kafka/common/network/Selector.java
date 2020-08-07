@@ -351,6 +351,7 @@ public class Selector implements Selectable {
 
         clear();
 
+        // 如果有
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
