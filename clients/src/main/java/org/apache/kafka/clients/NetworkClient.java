@@ -50,6 +50,9 @@ public class NetworkClient implements KafkaClient {
     private static final Logger log = LoggerFactory.getLogger(NetworkClient.class);
 
     /* the selector used to perform network i/o */
+    /**
+     * Kafka 封装的 Selector 通信组件
+     */
     private final Selectable selector;
 
     /**

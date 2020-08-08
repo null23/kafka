@@ -351,6 +351,7 @@ public class Selector implements Selectable {
 
         clear();
 
+        // 如果有
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
@@ -432,6 +433,7 @@ public class Selector implements Selectable {
                 // 读取响应，必须是没有 stagedReceives 才行，也就是必须处理完积压的响应消息
                 // todo 那这里就有个问题了，socket 缓冲区可能长期保持 READABLE 的状态？然后一直写入，导致 socket 缓冲区满了？
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
+                    // NetworkReceive 其实就是针对一个 RecordBatch 的相应
                     NetworkReceive networkReceive;
                     // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
                     // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取，也就是会读取出多个 NetworkReceive
@@ -642,6 +644,7 @@ public class Selector implements Selectable {
 
     /**
      * Check if given channel has a staged receive
+     * KafkaChannel，其实也就是 Broker，是否已经读取过一个 NetworkReceive
      */
     private boolean hasStagedReceive(KafkaChannel channel) {
         return stagedReceives.containsKey(channel);
@@ -661,6 +664,7 @@ public class Selector implements Selectable {
 
     /**
      * adds a receive to staged receives
+     * 获取到 每个 Broker/Channel 对应的队列
      */
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))
