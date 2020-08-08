@@ -249,6 +249,7 @@ public class Sender implements Runnable {
         for (ClientRequest request : requests)
             // 暂存发送的请求到 inFlightRequests 里，并且通过底层 selector 发送
             // todo 这里的 send 不会被覆盖吗，为啥啊
+            // todo 不会的，因为 缓存的 send 是针对 KafkaChannel 的，针对 Broker 发送请求，每次只会发送一个 ClientRequest
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;

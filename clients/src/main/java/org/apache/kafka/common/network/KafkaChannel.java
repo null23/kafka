@@ -42,6 +42,10 @@ public class KafkaChannel {
     private final Authenticator authenticator;
     private final int maxReceiveSize;
     private NetworkReceive receive;
+
+    /**
+     * send 是针对 KafkaChannel 的，而不是针对 Selector 的
+     */
     private Send send;
 
     public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize) throws IOException {
