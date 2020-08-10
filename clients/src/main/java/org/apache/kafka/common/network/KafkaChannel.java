@@ -41,6 +41,10 @@ public class KafkaChannel {
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     private final int maxReceiveSize;
+
+    /**
+     * 暂存的响应信息，暂存的目的，是为了解决拆包的问题
+     */
     private NetworkReceive receive;
 
     /**
@@ -145,6 +149,7 @@ public class KafkaChannel {
 
     /**
      * 读取响应，后续会处理粘包和拆包
+     * 一个 NetworkReceive 对应一个 ClientRequest
      */
     public NetworkReceive read() throws IOException {
         NetworkReceive result = null;

@@ -437,6 +437,7 @@ public class Selector implements Selectable {
                     NetworkReceive networkReceive;
                     // 这里可能读到多个针对这个 Broker 的响应，需要处理粘包
                     // 如果发现 networkReceive 不是 null，说明发生粘包，需要继续读取，也就是会读取出多个 NetworkReceive
+                    // 每一个 NetworkReceive 对应一个 ClientRequest，也就是说可能一次 OP_READ 事件，可能读取到多个 ClientRequest 对应的请求
                     while ((networkReceive = channel.read()) != null)
                         // stagedReceives 里保存的都是对粘包拆包处理完的 ByteBuffer，这些 ByteBuffer 被封装到了 NetworkReceive 里去
                         // 只有完整读取完了一条响应，才会把响应的结果添加到 stagedReceives 里去
@@ -679,6 +680,7 @@ public class Selector implements Selectable {
      * 处理刚才读取完的响应
      * 如果一次读取出来多个响应消息，在这里仅仅只会把每个连接的第一个响应消息放进 completedReceives
      * todo 即使是多个 Partition 的响应，也只是取第一个 Partition 的响应进行处理？
+     * todo 不是的，NetworkReceive 针对的是一个完整的 ClientRequest，包含了多个 Partition 的响应信息
      */
     private void addToCompletedReceives() {
         if (!this.stagedReceives.isEmpty()) {
