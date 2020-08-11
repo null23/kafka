@@ -110,6 +110,7 @@ public class Selector implements Selectable {
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
 
     /**
+     * Client 请求和 Broker 建立连接之后，立即连接上的（一般是 Client 和 Broker 在同一台机器可以立马连上）
      * Java NIO 的那个 Key
      */
     private final Set<SelectionKey> immediatelyConnectedKeys;
@@ -351,7 +352,9 @@ public class Selector implements Selectable {
 
         clear();
 
-        // 如果有
+        // 如果有没处理完的 ClientRequest 对应的请求（一次 OP_READ 读取了多个 ClientRequest 对应的请求）
+        // 就可以不阻塞 selector 监听后续的时间，先优先把上次 OP_READ 读取的 ClientRequest 的多个请求先处理完
+        // 其实就是 hasStagedReceives() = true 的时候，可以立即执行 addToCompletedReceives()
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
