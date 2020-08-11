@@ -185,13 +185,16 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
 
   /**
     * 请求队列，封装了被解析后的请求，是一个有界阻塞队列，队列大小默认是 500
+    * 是针对所有 Processor 的请求队列
     * 等待 IO 线程拉取
+    * 其实可以理解为，DFS 里对应的那个 IO 任务队列，所有 Processor 公共的 IO 任务队列
     */
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
 
   /**
-    * 响应队列，封装了请求处理完之后，返回给客户端的响应
-    * 每个 Processor 线程都有一个 ResponseQueue
+    * 响应队列，是一个数组，封装了请求处理完之后，返回给客户端的响应
+    * 每一个数组的元素，都对一个了一个 Processor 的响应队列
+    * 每个 Processor 线程都有一个 ResponseQueue，类似于 DFS 中每个 Processor 线程对应的响应队列
     */
   private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
   for(i <- 0 until numProcessors)

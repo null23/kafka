@@ -274,7 +274,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
   val serverChannel = openServerSocket(endPoint.host, endPoint.port)
 
   this.synchronized {
-    // 创建 Processor 线程
+    // 创建 Processor 线程，并且启动 Processor 线程
     processors.foreach { processor =>
       Utils.newThread("kafka-network-thread-%d-%s-%d".format(brokerId, endPoint.protocolType.toString, processor.id), processor, false).start()
     }
@@ -486,9 +486,12 @@ private[kafka] class Processor(val id: Int,
 
         // 对已经接受完毕的请求进行处理
         // 每次只处理一个请求
+        // 其实就是读取一个 NetworkReceive
+        // 并且取消对 OP_READ 事件的关注
         processCompletedReceives()
 
         // 对已经发送完毕的响应进行处理
+        // 重新关注 OP_READ 事件
         processCompletedSends()
 
         // 发现哪个客户端挂掉了，这里来处理
