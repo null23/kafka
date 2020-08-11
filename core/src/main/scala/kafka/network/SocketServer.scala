@@ -595,6 +595,15 @@ private[kafka] class Processor(val id: Int,
     }
   }
 
+  /**
+    * 这里很重要
+    * 这里重新关注了 OP_READ 事件
+    * 通过 isMute 对于 OP_READ 事件的关注的控制
+    * Broker 实现了：请求队列 + 响应队列，只能同时出现一个来自同一客户端的请求
+    * 只有在响应队列 poll 了对应的请求的响应，并且通过 KafkaSelector 把这个请求暂存到 KafkaChannel 之后，此时会监听 OP_WRITE 等待发送响应
+    * 等到响应成功发送之后，才会把请求扔到 completeSends 里，在处理 completeSends 的时候，才会重新关注 OP_READ 事件
+    * 才会触发后续的针对 stagedReceives 里积压的请求的处理，继续把 stagedReceives 里的请求放入 completeReceives 里
+    */
   private def processCompletedSends() {
     selector.completedSends.asScala.foreach { send =>
       val resp = inflightResponses.remove(send.destination).getOrElse {
