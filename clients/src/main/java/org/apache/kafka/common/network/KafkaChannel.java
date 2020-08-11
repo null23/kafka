@@ -200,7 +200,7 @@ public class KafkaChannel {
     /**
      * 发送暂存的消息
      * 如果发送完了，取消对 OP_WRITE 事件的关注
-     * 如果没发送完，其实就是粘包和拆包，下次继续发送
+     * 如果没发送完，其实发生了拆包，下次继续用上次暂存的 send 发送，继续从上次 remaining 的标志位发送就行了
      * @param send  暂存的要发送的数据
      */
     private boolean send(Send send) throws IOException {

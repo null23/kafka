@@ -380,6 +380,7 @@ public class Selector implements Selectable {
 
         // we use the time at the end of select to ensure that we don't close any connections that
         // have just been processed in pollSelectionKeys
+        // 处理空闲的长连接
         maybeCloseOldestConnection(endSelect);
     }
 
