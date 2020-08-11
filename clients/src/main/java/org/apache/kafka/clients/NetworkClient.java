@@ -473,7 +473,8 @@ public class NetworkClient implements KafkaClient {
      *
      * @param responses The list of responses to update
      * @param now The current time
-     * 缓存刚发送完的数据的信息
+     *
+     * 根据 acks 判断是否需要响应，如果不需要，那就直接从 inFlightRequests 里删掉
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // 获取到了每个 Broker 发送过的请求，并且遍历
