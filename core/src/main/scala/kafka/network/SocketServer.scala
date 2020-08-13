@@ -523,7 +523,7 @@ private[kafka] class Processor(val id: Int,
             trace("Socket server received empty response to send, registering for read: " + curr)
             selector.unmute(curr.request.connectionId)
           case RequestChannel.SendAction =>
-            // 发送响应
+            // 发送响应，其实就是把要发送的响应暂存到对应的 KafkaChannel 的 send 上
             sendResponse(curr)
           case RequestChannel.CloseConnectionAction =>
             curr.request.updateRequestMetrics
@@ -537,7 +537,7 @@ private[kafka] class Processor(val id: Int,
   }
 
   /* `protected` for test usage */
-  // 发送响应
+  // 发送响应，把需要发送的响应数据暂存到 KafkaChannel 的 send 上，并且关注 OP_WRITE 时间
   protected[network] def sendResponse(response: RequestChannel.Response) {
     trace(s"Socket server received response to send, registering for write and sending data: $response")
     val channel = selector.channel(response.responseSend.destination)
@@ -626,7 +626,7 @@ private[kafka] class Processor(val id: Int,
 
   /**
    * Register any new connections that have been queued up
-    * 把新的连接注册到 Processor 内部的 Selector 上去
+    * 把新的连接注册到 Processor 内部的 Selector 上去，并且关注 OP_READ 事件，等待来自 Client 的请求
    */
   private def configureNewConnections() {
     while (!newConnections.isEmpty) {
@@ -639,7 +639,7 @@ private[kafka] class Processor(val id: Int,
         val remoteHost = channel.socket().getInetAddress.getHostAddress
         val remotePort = channel.socket().getPort
         val connectionId = ConnectionId(localHost, localPort, remoteHost, remotePort).toString
-        // 注册到对应的 KSelector 上去
+        // 注册到对应的 KSelector 上去，并且关注 OP_READ 事件
         selector.register(connectionId, channel)
       } catch {
         // We explicitly catch all non fatal exceptions and close the socket to avoid a socket leak. The other
