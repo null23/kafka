@@ -274,7 +274,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
   val serverChannel = openServerSocket(endPoint.host, endPoint.port)
 
   this.synchronized {
-    // 创建 Processor 线程
+    // 创建 Processor 线程，并且启动 Processor 线程
     processors.foreach { processor =>
       Utils.newThread("kafka-network-thread-%d-%s-%d".format(brokerId, endPoint.protocolType.toString, processor.id), processor, false).start()
     }
@@ -486,9 +486,12 @@ private[kafka] class Processor(val id: Int,
 
         // 对已经接受完毕的请求进行处理
         // 每次只处理一个请求
+        // 其实就是读取一个 NetworkReceive
+        // 并且取消对 OP_READ 事件的关注
         processCompletedReceives()
 
         // 对已经发送完毕的响应进行处理
+        // 重新关注 OP_READ 事件
         processCompletedSends()
 
         // 发现哪个客户端挂掉了，这里来处理
@@ -567,7 +570,14 @@ private[kafka] class Processor(val id: Int,
 
   /**
     * 处理接受完的响应
-    * 其实就是和 Producer 一样，处理解析完成的 NetworkReceive，把解析完成的 Network
+    * 把解析玩的请求，放入请求队列，等待后续 Handler 线程池的处理
+    * 这个方法其实相当的重要，体现在两个地方
+    * 一个是每次只处理一个来自 Selector 中的 completedReceives 队列里的 NetworkReceive
+    *   也就是只会同时处理一个来自客户端的 ClientRequest，把这个请求放入 Broker 全局唯一的请求队列里
+    * 二是取消对 OP_READ 事件的关注
+    *   一旦取消了对 OP_READ 事件的关注，在 addToCompletedReceives 把 NetworkReceive 放入从 stagedReceives 队列放入 completedReceives 队列里的时候
+    *   会因为 !isMute 被过滤掉，也就不会再次放入请求队列
+    *   直到整条的请求从请求队列弹出，进入响应队列，再从响应队列弹出，关注 OP_WRITE 事件，才会继续执行 addToCompletedReceives
     */
   private def processCompletedReceives() {
     // completedReceives 封装了来自每个客户端的一个请求
@@ -592,6 +602,15 @@ private[kafka] class Processor(val id: Int,
     }
   }
 
+  /**
+    * 这里很重要
+    * 这里重新关注了 OP_READ 事件
+    * 通过 isMute 对于 OP_READ 事件的关注的控制
+    * Broker 实现了：请求队列 + 响应队列，只能同时出现一个来自同一客户端的请求
+    * 只有在响应队列 poll 了对应的请求的响应，并且通过 KafkaSelector 把这个请求暂存到 KafkaChannel 之后，此时会监听 OP_WRITE 等待发送响应
+    * 等到响应成功发送之后，才会把请求扔到 completeSends 里，在处理 completeSends 的时候，才会重新关注 OP_READ 事件
+    * 才会触发后续的针对 stagedReceives 里积压的请求的处理，继续把 stagedReceives 里的请求放入 completeReceives 里，不然就会一直卡在 org.apache.kafka.common.network.Selector#addToCompletedReceives() 的 !isMute
+    */
   private def processCompletedSends() {
     selector.completedSends.asScala.foreach { send =>
       val resp = inflightResponses.remove(send.destination).getOrElse {

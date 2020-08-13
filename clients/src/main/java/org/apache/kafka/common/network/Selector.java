@@ -383,6 +383,7 @@ public class Selector implements Selectable {
 
         // we use the time at the end of select to ensure that we don't close any connections that
         // have just been processed in pollSelectionKeys
+        // 处理空闲的长连接
         maybeCloseOldestConnection(endSelect);
     }
 
@@ -692,6 +693,11 @@ public class Selector implements Selectable {
             while (iter.hasNext()) {
                 Map.Entry<KafkaChannel, Deque<NetworkReceive>> entry = iter.next();
                 KafkaChannel channel = entry.getKey();
+
+                // 这里的 mute 判断，是针对 Broker 来的
+                // 只有在关注了 OP_READ 事件的时候，才能把 stagedReceives 里的请求放入 completedReceives 里
+                // 也就是，在 Broker 的请求队列以及响应队列里，同时只会存在一个来自同一客户端的 NetworkReceive
+                // 只有在 Broker 的工作线程池 Handler 把响应队列里对应这个请求处理完，重新关注 OP_READ 事件之后，才会继续处理后续的来自同一客户端的 NetworkReceive
                 if (!channel.isMute()) {
                     // 取出每个 Broker 对应的 响应队列 里的第一个 响应
                     Deque<NetworkReceive> deque = entry.getValue();
