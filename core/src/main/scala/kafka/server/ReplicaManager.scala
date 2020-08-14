@@ -98,6 +98,17 @@ object ReplicaManager {
   val IsrChangePropagationInterval = 60000L
 }
 
+/**
+  * 副本管理器
+  * 副本管理器的元数据主要包括：
+  *   - 所有的 Partition 信息 + LogManager
+  *   - 高水位信息 + ReplicaFetcherManager
+  *   - ISR 列表信息 + ReplicaFetcherManager
+  *
+  * 副本管理器所涉及到的核心组件主要包括：
+  *   - LogManager 写入磁盘的组件
+  *   - 一些延时调度的线程
+  */
 class ReplicaManager(val config: KafkaConfig,
                      metrics: Metrics,
                      time: Time,
@@ -111,25 +122,54 @@ class ReplicaManager(val config: KafkaConfig,
   /* epoch of the controller that last changed the leader */
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   private val localBrokerId = config.brokerId
+
+  /**
+    * 当前这台 Broker 上存储的所有 Partition
+    */
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
+
+  /**
+    * 负责副本的拉取和同步
+    */
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix, quotaManager)
+
+  /**
+    * 高水位检查机制
+    * Leader 读到的消息，会立马更新 Leader 的 LEO
+    * 但是只有在所有 Follower 都同步到一条数据之后 HW 才会更新，HW 之后的数据，都是 UnCommitted 的，是无法被消费的
+    */
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
+
   val highWatermarkCheckpoints = config.logDirs.map(dir => (new File(dir).getAbsolutePath, new OffsetCheckpoint(new File(dir, ReplicaManager.HighWatermarkFilename)))).toMap
+
   private var hwThreadInitialized = false
   this.logIdent = "[Replica Manager on Broker " + localBrokerId + "]: "
   val stateChangeLogger = KafkaController.stateChangeLogger
+
+  /**
+    * ISR 列表
+    * Leader 肯定在这里，Follower 不一定
+    * 只有 Follower 跟上了 Leader 的数据同步，没有落后太多，此时才能在 ISR 列表中
+    */
   private val isrChangeSet: mutable.Set[TopicAndPartition] = new mutable.HashSet[TopicAndPartition]()
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
 
+  /**
+    * 延时调度
+    * 用的时间轮的算法
+    */
   val delayedProducePurgatory = DelayedOperationPurgatory[DelayedProduce](
     purgatoryName = "Produce", config.brokerId, config.producerPurgatoryPurgeIntervalRequests)
   val delayedFetchPurgatory = DelayedOperationPurgatory[DelayedFetch](
     purgatoryName = "Fetch", config.brokerId, config.fetchPurgatoryPurgeIntervalRequests)
 
+  /**
+    * 本地存储了多少 Leader
+    */
   val leaderCount = newGauge(
     "LeaderCount",
     new Gauge[Int] {
@@ -138,18 +178,30 @@ class ReplicaManager(val config: KafkaConfig,
       }
     }
   )
+
+  /**
+    * 本地存储了多少 Partition
+    */
   val partitionCount = newGauge(
     "PartitionCount",
     new Gauge[Int] {
       def value = allPartitions.size
     }
   )
+
+  /**
+    * 副本数量不充足的 Partition
+    */
   val underReplicatedPartitions = newGauge(
     "UnderReplicatedPartitions",
     new Gauge[Int] {
       def value = underReplicatedPartitionCount()
     }
   )
+
+  /**
+    * ISR 列表伸缩和扩张的速率
+    */
   val isrExpandRate = newMeter("IsrExpandsPerSec",  "expands", TimeUnit.SECONDS)
   val isrShrinkRate = newMeter("IsrShrinksPerSec",  "shrinks", TimeUnit.SECONDS)
 
@@ -212,8 +264,12 @@ class ReplicaManager(val config: KafkaConfig,
     debug("Request key %s unblocked %d fetch requests.".format(key.keyLabel, completed))
   }
 
+  /**
+    * 开启维护 ISR 列表的线程
+    */
   def startup() {
     // start ISR expiration thread
+    // 开启维护 ISR 列表的线程
     scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }

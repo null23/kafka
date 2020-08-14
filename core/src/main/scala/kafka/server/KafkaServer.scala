@@ -206,6 +206,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         notifyClusterListeners(kafkaMetricsReporters ++ reporters.asScala)
 
         /* start log manager */
+        /**
+          * 把消息写入磁盘文件的组件
+          */
         logManager = createLogManager(zkUtils.zkClient, brokerState)
         logManager.startup()
 
@@ -219,8 +222,12 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         socketServer.startup()
 
         /* start replica manager */
+        // 负责把消息写入磁盘
+        // logManager 是真正负责把消息写入磁盘的，replicaManager 其实是在上边封装了一套
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown, quotaManagers.follower)
+
+        // 开启维护 ISR 列表的线程
         replicaManager.startup()
 
         /* start kafka controller */
