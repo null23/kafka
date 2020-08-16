@@ -115,6 +115,10 @@ class Log(val dir: File,
   loadSegments()
 
   /* Calculate the offset of the next message */
+  /**
+    * LEO
+    * 根据 lastOffset + 1 就可以计算出来
+    */
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
 
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
@@ -277,6 +281,9 @@ class Log(val dir: File,
 
   }
 
+  /**
+    * nextOffsetMetadata 其实就是 LEO，根据最后一个 lastOffset + 1
+    */
   private def updateLogEndOffset(messageOffset: Long) {
     nextOffsetMetadata = new LogOffsetMetadata(messageOffset, activeSegment.baseOffset, activeSegment.size.toInt)
   }
@@ -425,7 +432,7 @@ class Log(val dir: File,
           offsetOfLargestTimestamp = appendInfo.offsetOfMaxTimestamp, messages = validMessages)
 
         // increment the log end offset
-        // 更新 LEO，LeaderPartition 每写入一条数据就更新自己的 LEO
+        // 更新 nextOffsetMetadata，也就是 LEO，LeaderPartition 每写入一条数据就更新自己的 LEO
         // HW 只能看其他 Follower 的同步情况了
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
