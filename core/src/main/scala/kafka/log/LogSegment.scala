@@ -53,6 +53,10 @@ class LogSegment(val log: FileMessageSet,
   var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
+   /**
+     * 自从上次写入索引信息之后，又写入了多少字节的数据
+     * 维护索引信息，如果 bytesSinceLastIndexEntry 到达了默认的 4096 字节，就会向索引文件里追加一条索引信息
+     */
   private var bytesSinceLastIndexEntry = 0
 
   /* The timestamp we used for time based log rolling */
@@ -91,13 +95,14 @@ class LogSegment(val log: FileMessageSet,
     *   这条 “好困啊” 的消息对应的逻辑 offset（也就是全局的那个 offset） 是 2574158
     *   但是在写磁盘或者从磁盘读取的时候，其实用的不是全局的逻辑上的 offset，而是物理的 offset，比如可能是 7893，代表了在这个日志段的具体的哪个字节
     *
-    *   .index 稀疏索引的结构大概为：逻辑 offset 的区间 + 物理 offset 的起始位置
-    *   offset=2572580-2575789（逻辑 offset 的区间） + 物理 offset = 2188（这个物理 offset 记录的值，其实就是对应了 2572580，就是逻辑 offset 的范围的起始值）
+    *   .index 稀疏索引的结构大概为：逻辑 offset  + 物理 offset 的起始位置
+    *   逻辑 offset=2572580 + 物理 offset = 2188（这个物理 offset 记录的值，其实就是对应了 2572580）
+    *   每写入 4096 字节的数据，就需要针对这些数据写入一条新的索引信息，目的是为了二分查找定位到物理 offset 之后，向后遍历的时候不至于花太多时间
     *
     *   如果现在要查找 offset = 2574158，也就是 “好困啊” 这条数据，那么查找的顺序如下：
     *     1. 首先，根据文件名进行二分查找，找到对应的 .index 稀疏索引文件
     *     2. 在 .index 索引文件内部，在通过 逻辑offset 的范围，定位到一个 物理offset（具体在磁盘文件的哪个字节上）
-    *     3. 从物理 offset 往后遍历，直到找到对应的数据
+    *     3. 从物理 offset 往后遍历，直到找到对应的数据，当然遍历的时间复杂度成本不会很高，因为每隔 4096 字节就会建立一个稀疏索引
    */
   @nonthreadsafe
   def append(firstOffset: Long, largestTimestamp: Long, offsetOfLargestTimestamp: Long, messages: ByteBufferMessageSet) {
@@ -117,14 +122,21 @@ class LogSegment(val log: FileMessageSet,
       }
       // append an entry to the index (if needed)
       // 将消息的 offset 相关信息写入索引
+      // 判断了是否到达了 4096 字节，到达了就会顺序写一条索引信息到索引文件里
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
         // 写入 .index 稀疏索引
+        // 基于 MappedByteBuffer 写入 .index 磁盘文件
+        // 这个写入是基于 os cache 来进行的
+        // 也就是说，写入的其实是内存，而不是底层物理的磁盘文件
+        // firstOffset 是全局的 逻辑offset，physicalPosition 是 物理offset
         index.append(firstOffset, physicalPosition)
 
         // 写入时间戳索引
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestamp)
         bytesSinceLastIndexEntry = 0
       }
+
+      // 累加自上一次追加写入索引信息之后，又写入了多少字节
       bytesSinceLastIndexEntry += messages.sizeInBytes
     }
   }

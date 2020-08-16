@@ -44,6 +44,9 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
 
   protected val lock = new ReentrantLock
 
+  /**
+    * 实例化 MappedByteBuffer
+    */
   @volatile
   protected var mmap: MappedByteBuffer = {
     val newlyCreated = _file.createNewFile()

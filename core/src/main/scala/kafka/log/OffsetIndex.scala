@@ -117,13 +117,29 @@ class OffsetIndex(file: File, baseOffset: Long, maxIndexSize: Int = -1)
   
   /**
    * Append an entry for the given offset/location pair to the index. This entry must have a larger offset than all subsequent entries.
+    * 基于 OS Cache 实现的文件映射到内存的技术
+    * 就是可以把磁盘上的 .index 文件映射到 os 内存里去
+    * 这对这个东西的读和写，都是基于 os cache 内存来执行的
+    *
+    * 一行稀疏索引的数据，具体的格式大概为：
+    * 逻辑offset=12574，物理offset=7489
+    *
+    * 到时候查找某个 offset 的消息的时候，就可以根据 逻辑offset 进行二分查找，然后定位到其在具体的磁盘上的物理位置的哪个字节
    */
   def append(offset: Long, position: Int) {
     inLock(lock) {
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         debug("Adding index entry %d => %d to %s.".format(offset, position, file.getName))
+        // 基于 mmap 写入 os cache
+        // 写入 .index 一行数据的 逻辑offset
+        // 比如 逻辑offset=23897
         mmap.putInt((offset - baseOffset).toInt)
+        // 为什么是写 int 类型的呢？因为 Int 是 32位的，Long 是 64位 的，而单纯的 逻辑offset 的值一般都很大，甚至几个 Long 可能都存不下
+        // 如果存储 逻辑offset 的时候是采用的差值，那么数字就会很小，直接用 int 类型就能 cover 住
+
+        // 写入 .index 一行数据的 物理offset
+        // 比如 物理offset=71157
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset

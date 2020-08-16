@@ -103,6 +103,9 @@ object Message {
 /**
  * A message. The format of an N byte message is the following:
  *
+  * 一个 byte（字节） 是 8 个 bit，一个 bit 就可以代表一位二进制的数字
+  * 比如 0000 0000，就代表了 8 个 bit，同时也是一个 byte
+  *
  * 1. 4 byte CRC32 of the message
  * 2. 1 byte "magic" identifier to allow format changes, value is 0 or 1
  * 3. 1 byte "attributes" identifier to allow annotations on the message independent of the version
@@ -116,7 +119,7 @@ object Message {
  *      1 : log append time
  *    bit 4 ~ 7 : reserved
  * 4. (Optional) 8 byte timestamp only if "magic" identifier is greater than 0
- * 5. 4 byte key length, containing length K
+ * 5. 4 byte key length, containing length Kz
  * 6. K byte key
  * 7. 4 byte payload length, containing length V
  * 8. V byte payload

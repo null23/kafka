@@ -351,6 +351,8 @@ class FileMessageSet private[kafka](@volatile var file: File,
    * Append these messages to the message set
    */
   def append(messages: ByteBufferMessageSet) {
+    // 使用 FileChannel 把数据写入磁盘文件
+    // FileChannel 是优先写入 os cache 内存里去的，会定时把 os cache 的数据 flush 写入磁盘
     val written = messages.writeFullyTo(channel)
     _size.getAndAdd(written)
   }
