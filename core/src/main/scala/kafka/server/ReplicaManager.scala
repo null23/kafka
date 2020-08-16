@@ -379,11 +379,15 @@ class ReplicaManager(val config: KafkaConfig,
   def appendMessages(timeout: Long,
                      requiredAcks: Short,
                      internalTopicsAllowed: Boolean,
+                    // 每个分区对应一个 MessageSet，其实就是对应 一个 Partition 的一个 RecordBatch
                      messagesPerPartition: Map[TopicPartition, MessageSet],
                      responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {
 
+    // 验证 acks 是否合法
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = SystemTime.milliseconds
+
+      // 将数据写入每个分区的磁盘文件中，会获取到每个本地磁盘文件写入的结果（因为一个 ProduceRequest 里有多个 RecordBatch，对应了多个 Partition）
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
@@ -438,31 +442,43 @@ class ReplicaManager(val config: KafkaConfig,
     localProduceResults.values.count(_.error.isDefined) < messagesPerPartition.size
   }
 
+  /**
+    * acks 是否规范
+    */
   private def isValidRequiredAcks(requiredAcks: Short): Boolean = {
+    // acks = 0，客户端不需要等待任何的返回值
+    // acks = 1，Leader 写入成功就可以返回了
+    // acks = -1，需要等待所有的副本都拉取完数据才返回
     requiredAcks == -1 || requiredAcks == 1 || requiredAcks == 0
   }
 
   /**
    * Append the messages to the local replica logs
+    * 将消息 MessageSet（对应一个 Record Batch）写入 Partition 对应的目录下的磁盘文件中
    */
   private def appendToLocalLog(internalTopicsAllowed: Boolean,
                                messagesPerPartition: Map[TopicPartition, MessageSet],
                                requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {
     trace("Append [%s] to local log ".format(messagesPerPartition))
+    // 拿到每个 Partition 对应的 RecordBatch
     messagesPerPartition.map { case (topicPartition, messages) =>
       BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).totalProduceRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalProduceRequestRate.mark()
 
       // reject appending to internal topics if it is not allowed
+      // Kafka 内部的 topic，类似于 consumer_offsets
       if (Topic.isInternal(topicPartition.topic) && !internalTopicsAllowed) {
         (topicPartition, LogAppendResult(
           LogAppendInfo.UnknownLogAppendInfo,
           Some(new InvalidTopicException("Cannot append to internal topic %s".format(topicPartition.topic)))))
       } else {
         try {
+          // 获取到一个 Partition
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
+              // 核心的逻辑，调用了 Partition 的方法
+              // 将一个 Partition 对应的 RecordBatch 的消息写入到磁盘
               partition.appendMessagesToLeader(messages.asInstanceOf[ByteBufferMessageSet], requiredAcks)
             case None => throw new UnknownTopicOrPartitionException("Partition %s doesn't exist on %d"
               .format(topicPartition, localBrokerId))

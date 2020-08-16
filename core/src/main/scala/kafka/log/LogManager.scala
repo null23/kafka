@@ -36,6 +36,21 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * size or I/O rate.
  * 
  * A background thread handles log retention by periodically truncating excess log segments.
+  *
+  * Kafka 日志存储结构
+  * 每一个 Partition 对应一个 Log，一个 Log 可以理解为一个物理的文件夹。
+  * 每个 Log 有多个 LogSegment 日志段
+  * 每个 LogSegment 有一个磁盘文件
+  * 每一个磁盘文件里有
+  *   - 存放具体数据的 .log
+  *   - 存放稀疏索引的 .index
+  *   - 存放时间索引的 .timestamp
+  *
+  * 需要关注的几个点分别是：
+  *   - 磁盘顺序写，写磁盘的 IO 的细节
+  *   - 如何写 os cache
+  *   - 如何定时 flush os cache
+  *   - log cleaner 如何定时清理过期的磁盘文件
  */
 @threadsafe
 class LogManager(val logDirs: Array[File],
@@ -53,14 +68,26 @@ class LogManager(val logDirs: Array[File],
   val LockFile = ".lock"
   val InitialTaskDelayMs = 30*1000
   private val logCreationOrDeletionLock = new Object
+
+  /**
+    * 每个 Partition 对应一个 Log，文件夹的格式为 topic-partition序号，例如 test-topic-0
+    * 每个 Log 下又会对应多个 LogSegment，每个 LogSegment 对应一个 .log 和一个 .index 稀疏索引
+    */
   private val logs = new Pool[TopicAndPartition, Log]()
 
   createAndValidateLogDirs(logDirs)
   private val dirLocks = lockLogDirs(logDirs)
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
+
+  /**
+    * 根据目录文件和格式，加载出来，放到内存里
+    */
   loadLogs()
 
   // public, so we can access this from kafka.admin.DeleteTopicTest
+  /**
+    * 定时清理磁盘文件的
+    */
   val cleaner: LogCleaner =
     if(cleanerConfig.enableCleaner)
       new LogCleaner(cleanerConfig, logDirs, logs, time = time)
@@ -105,6 +132,7 @@ class LogManager(val logDirs: Array[File],
   
   /**
    * Recover and load all logs in the given data directories
+    * 把本地的日志相关的信息加载到内存里
    */
   private def loadLogs(): Unit = {
     info("Loading logs.")
@@ -112,6 +140,7 @@ class LogManager(val logDirs: Array[File],
     val threadPools = mutable.ArrayBuffer.empty[ExecutorService]
     val jobs = mutable.Map.empty[File, Seq[Future[_]]]
 
+    // 每个配置的 LogDir 使用一个线程池
     for (dir <- this.logDirs) {
       val pool = Executors.newFixedThreadPool(ioThreads)
       threadPools.append(pool)
@@ -137,18 +166,28 @@ class LogManager(val logDirs: Array[File],
           warn("Resetting the recovery checkpoint to 0")
       }
 
+      // 针对 logDir 递归遍历，获取当前 logDir 下所有的文件信息
+      // 如果是第一次执行，那就是 logDir 默认就是我们配置的，比如说 F:\data\kafka-logs\test-topic-0
       val jobsForDir = for {
+        // 这里是拿到了具体的内容
         dirContent <- Option(dir.listFiles).toList
+
+        // 由于是类似于递归遍历的子目录，所以可能拿到的是一个文件夹
+        // 这里说的是 logDir 是一个文件夹，那就继续向文件夹下遍历
         logDir <- dirContent if logDir.isDirectory
       } yield {
         CoreUtils.runnable {
           debug("Loading log '" + logDir.getName + "'")
 
+          // 扫描所有的 Topic 的 Partition 信息
+          // Topic-Partition序号，例如 test-topic-0
           val topicPartition = Log.parseTopicPartitionName(logDir)
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
 
           val current = new Log(logDir, config, logRecoveryPoint, scheduler, time)
+
+          // 放入到 log 集合
           val previous = this.logs.put(topicPartition, current)
 
           if (previous != null) {
@@ -159,6 +198,7 @@ class LogManager(val logDirs: Array[File],
         }
       }
 
+      // 开启清理过期日志的任务
       jobs(cleanShutdownFile) = jobsForDir.map(pool.submit).toSeq
     }
 

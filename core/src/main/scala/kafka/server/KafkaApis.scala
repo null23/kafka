@@ -444,11 +444,14 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       // call the replica manager to append messages to the replicas
+      // 写入磁盘的入口
       // ReplicaManager 将消息写入副本中（其实就是把消息写入磁盘），并且调用回调函数
       replicaManager.appendMessages(
         produceRequest.timeout.toLong,
         produceRequest.acks,
         internalTopicsAllowed,
+
+        // 这个很重要，每个 Partition 对应的 MessageSet
         authorizedMessagesPerPartition,
 
         // 刚才封装的回调函数

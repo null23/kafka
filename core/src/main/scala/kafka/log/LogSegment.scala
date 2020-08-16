@@ -84,6 +84,20 @@ class LogSegment(val log: FileMessageSet,
    * @param largestTimestamp The largest timestamp in the message set.
    * @param offsetOfLargestTimestamp The offset of the message that has the largest timestamp in the messages to append.
    * @param messages The messages to append.
+    * 将消息写入日志段
+    *
+    * 这里主要说下稀疏索引的意义：
+    *   假如 .log 写入了一条具体的消息 - “好困啊”
+    *   这条 “好困啊” 的消息对应的逻辑 offset（也就是全局的那个 offset） 是 2574158
+    *   但是在写磁盘或者从磁盘读取的时候，其实用的不是全局的逻辑上的 offset，而是物理的 offset，比如可能是 7893，代表了在这个日志段的具体的哪个字节
+    *
+    *   .index 稀疏索引的结构大概为：逻辑 offset 的区间 + 物理 offset 的起始位置
+    *   offset=2572580-2575789（逻辑 offset 的区间） + 物理 offset = 2188（这个物理 offset 记录的值，其实就是对应了 2572580，就是逻辑 offset 的范围的起始值）
+    *
+    *   如果现在要查找 offset = 2574158，也就是 “好困啊” 这条数据，那么查找的顺序如下：
+    *     1. 首先，根据文件名进行二分查找，找到对应的 .index 稀疏索引文件
+    *     2. 在 .index 索引文件内部，在通过 逻辑offset 的范围，定位到一个 物理offset（具体在磁盘文件的哪个字节上）
+    *     3. 从物理 offset 往后遍历，直到找到对应的数据
    */
   @nonthreadsafe
   def append(firstOffset: Long, largestTimestamp: Long, offsetOfLargestTimestamp: Long, messages: ByteBufferMessageSet) {
@@ -94,6 +108,7 @@ class LogSegment(val log: FileMessageSet,
       if (physicalPosition == 0)
         rollingBasedTimestamp = Some(largestTimestamp)
       // append the messages
+      // 将消息写入日志段
       log.append(messages)
       // Update the in memory max timestamp and corresponding offset.
       if (largestTimestamp > maxTimestampSoFar) {
@@ -101,8 +116,12 @@ class LogSegment(val log: FileMessageSet,
         offsetOfMaxTimestamp = offsetOfLargestTimestamp
       }
       // append an entry to the index (if needed)
+      // 将消息的 offset 相关信息写入索引
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
+        // 写入 .index 稀疏索引
         index.append(firstOffset, physicalPosition)
+
+        // 写入时间戳索引
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestamp)
         bytesSinceLastIndexEntry = 0
       }

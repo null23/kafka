@@ -80,6 +80,8 @@ case class LogAppendInfo(var firstOffset: Long,
  * @param scheduler The thread pool scheduler used for background actions
  * @param time The time instance used for checking the clock
  *
+  * Log 就是一个实体的文件夹
+  * 一个 Topic 的 Partition 就对应一个 Log 对象，例如一个名为 test-topic-0 的文件夹
  */
 @threadsafe
 class Log(val dir: File,
@@ -103,7 +105,12 @@ class Log(val dir: File,
       0
   }
   val t = time.milliseconds
+
   /* the actual segments of the log */
+  /**
+    * 当前 Log 目录下的日志段
+    * Log 对应一个实体文件夹，每个 Topic 的 Partition 都对应一个 Log
+    */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   loadSegments()
 
@@ -335,6 +342,8 @@ class Log(val dir: File,
    * @param assignOffsets Should the log assign offsets to this message set or blindly apply what it is given
    * @throws KafkaStorageException If the append fails due to an I/O error.
    * @return Information about the appended messages including the first and last offset.
+    *
+    *  把消息写入一个具体的 Log 对象
    */
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
     val appendInfo = analyzeAndValidateMessageSet(messages)
@@ -348,10 +357,13 @@ class Log(val dir: File,
 
     try {
       // they are valid, insert them in the log
+      // 可以看到，对一个 Partition 进行写入的时候是有并发控制的
+      // 同时只能有一个线程向一个 Partition 写入数据
       lock synchronized {
 
         if (assignOffsets) {
           // assign offsets to the message set
+          // 对于每个分区目录，每个消息的 offset 都是顺序增长的
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
@@ -402,14 +414,19 @@ class Log(val dir: File,
         }
 
         // maybe roll the log if this segment is full
+        // 如果一个日志段写满了，那就写下一个日志段，一个日志段的大小默认是 1G
+        // 会根据当前的 LEO 重新创建一个新的日志段
         val segment = maybeRoll(messagesSize = validMessages.sizeInBytes,
                                 maxTimestampInMessages = appendInfo.maxTimestamp)
 
         // now append to the log
+        // 将 RecordBatch 写入一个日志段
         segment.append(firstOffset = appendInfo.firstOffset, largestTimestamp = appendInfo.maxTimestamp,
           offsetOfLargestTimestamp = appendInfo.offsetOfMaxTimestamp, messages = validMessages)
 
         // increment the log end offset
+        // 更新 LEO，LeaderPartition 每写入一条数据就更新自己的 LEO
+        // HW 只能看其他 Follower 的同步情况了
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
@@ -728,12 +745,23 @@ class Log(val dir: File,
    * the first message does not have a timestamp)
    * <li> The index is full
    * </ol>
+    *
+    * 如果当前日志段写满了，就写下一个日志段
+    * 当前的日志段就是 activeSegment，正在活跃的 LogSegment
+    * 写新的日志段的条件有两个
+    *   - 写满了
+    *   - 时间超过阈值
    * @return The currently active segment after (perhaps) rolling to a new segment
    */
   private def maybeRoll(messagesSize: Int, maxTimestampInMessages: Long): LogSegment = {
+    // 活跃的 LogSegment，也就是当前正在写入的日志段
     val segment = activeSegment
     val now = time.milliseconds
+
+    // 超过多久就要写下一个新的日志段，目测是为了维护时间的那个索引
     val reachedRollMs = segment.timeWaitedForRoll(now, maxTimestampInMessages) > config.segmentMs - segment.rollJitterMs
+
+    // 如果剩余空间不够，或者是到达了时间的阈值，或者是稀疏索引写满了，就创建一个新的 LogSegment 用于写入
     if (segment.size > config.segmentSize - messagesSize ||
         (segment.size > 0 && reachedRollMs) ||
         segment.index.isFull || segment.timeIndex.isFull) {
@@ -741,6 +769,8 @@ class Log(val dir: File,
           s"index_size = ${segment.index.entries}/${segment.index.maxEntries}, " +
           s"time_index_size = ${segment.timeIndex.entries}/${segment.timeIndex.maxEntries}, " +
           s"inactive_time_ms = ${segment.timeWaitedForRoll(now, maxTimestampInMessages)}/${config.segmentMs - segment.rollJitterMs}).")
+
+      // 创建一个新的日志段，用 LEO 作为新的日志段的名字
       roll()
     } else {
       segment
@@ -751,14 +781,23 @@ class Log(val dir: File,
    * Roll the log over to a new active segment starting with the current logEndOffset.
    * This will trim the index to the exact size of the number of entries it currently contains.
    *
+    * 创建一个新的日志段用于写入，新的日志段是以最大的 offset + 1 开头的
    * @return The newly rolled segment
    */
   def roll(): LogSegment = {
     val start = time.nanoseconds
     lock synchronized {
+      // 获取最新的 offset，LEO 就是 最后的 offset + 1
       val newOffset = logEndOffset
+
+      // 文件名是根据 offset + 1 生成的 LEO 来计算出来的
+      // 新的 .log 的文件名
       val logFile = logFilename(dir, newOffset)
+
+      // 新的 offset 的稀疏索引的文件名
       val indexFile = indexFilename(dir, newOffset)
+
+      // 新的时间戳索引的文件名
       val timeIndexFile = timeIndexFilename(dir, newOffset)
       for(file <- List(logFile, indexFile, timeIndexFile); if file.exists) {
         warn("Newly rolled segment file " + file.getName + " already exists; deleting it first")
@@ -784,7 +823,10 @@ class Log(val dir: File,
                                    fileAlreadyExists = false,
                                    initFileSize = initFileSize,
                                    preallocate = config.preallocate)
+
+      // 把新的日志段添加到 Log 对应的日志段集合里
       val prev = addSegment(segment)
+
       if(prev != null)
         throw new KafkaException("Trying to roll a new log segment for topic partition %s with start offset %d while it already exists.".format(name, newOffset))
       // We need to update the segment base offset and append position data of the metadata when log rolls.
