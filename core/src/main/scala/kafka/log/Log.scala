@@ -439,6 +439,7 @@ class Log(val dir: File,
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
 
+        // 如果磁盘的数据和 os cache 的数据落后超过 1w 条，就刷盘
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -850,6 +851,8 @@ class Log(val dir: File,
 
   /**
    * The number of messages appended to the log since the last flush
+    * 未刷盘的数据的数量
+    * LEO - 上次刷盘的 offset
    */
   def unflushedMessages() = this.logEndOffset - this.recoveryPoint
 
@@ -861,6 +864,7 @@ class Log(val dir: File,
   /**
    * Flush log segments for all offsets up to offset-1
    *
+    * 把 .log 和 .index 的 os cache 都刷盘
    * @param offset The offset to flush up to (non-inclusive); the new recovery point
    */
   def flush(offset: Long) : Unit = {
@@ -872,6 +876,7 @@ class Log(val dir: File,
       segment.flush()
     lock synchronized {
       if(offset > this.recoveryPoint) {
+        // 设置 recoveryPoint 为 LEO
         this.recoveryPoint = offset
         lastflushedTime.set(time.milliseconds)
       }

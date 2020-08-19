@@ -17,7 +17,7 @@
 
 package kafka.log
 
-import java.io.{File, RandomAccessFile}
+import java.io.{File, IOException, RandomAccessFile}
 import java.nio.{ByteBuffer, MappedByteBuffer}
 import java.nio.channels.FileChannel
 import java.util.concurrent.locks.{Lock, ReentrantLock}
@@ -137,6 +137,8 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
 
   /**
    * Flush the data in the index to disk
+    * 一次性把 MappedByteBuffer 的所有数据刷盘
+    * 因为稀疏索引写的少，一次性刷就可以了
    */
   def flush() {
     inLock(lock) {

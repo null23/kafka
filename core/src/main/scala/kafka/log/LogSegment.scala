@@ -339,11 +339,15 @@ class LogSegment(val log: FileMessageSet,
 
   /**
    * Flush this log segment to disk
+    * .log 和 .index 刷盘
    */
   @threadsafe
   def flush() {
     LogFlushStats.logFlushTimer.time {
+      // .log 刷盘
       log.flush()
+
+      // .index 刷盘
       index.flush()
       timeIndex.flush()
     }
