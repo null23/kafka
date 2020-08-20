@@ -107,6 +107,8 @@ class FileMessageSet private[kafka](@volatile var file: File,
    * @param position The start position to begin the read from
    * @param size The number of bytes after the start position to include
    *
+    * 从某个 offset 开始读取数据
+    * 基于起始的 position 和结束的 position 读取就可以了
    * @return A sliced wrapper on this message set limited based on the given position and size
    */
   def read(position: Int, size: Int): FileMessageSet = {

@@ -78,6 +78,8 @@ class KafkaApis(val requestChannel: RequestChannel,
       ApiKeys.forId(request.requestId) match {
         // 处理来自 Producer 发送消息的请求
         case ApiKeys.PRODUCE => handleProducerRequest(request)
+
+        // 处理 Follower 的 fetch 请求
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
@@ -548,6 +550,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(Seq.empty)
     else {
       // call the replica manager to fetch messages from the local replica
+      // 从本地磁盘读取数据出来，返回给 Follower
       replicaManager.fetchMessages(
         fetchRequest.maxWait.toLong,
         fetchRequest.replicaId,

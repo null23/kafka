@@ -234,6 +234,10 @@ class ReplicaFetcherThread(name: String,
     delayPartitions(partitions, brokerConfig.replicaFetchBackoffMs.toLong)
   }
 
+  /**
+    * 发送请求，并且处理结果
+    * 推测是同步的？是的
+    */
   protected def fetch(fetchRequest: FetchRequest): Seq[(TopicPartition, PartitionData)] = {
     val clientResponse = sendRequest(ApiKeys.FETCH, Some(fetchRequestVersion), fetchRequest.underlying)
     new FetchResponse(clientResponse.responseBody).responseData.asScala.toSeq.map { case (key, value) =>
@@ -241,6 +245,9 @@ class ReplicaFetcherThread(name: String,
     }
   }
 
+  /**
+    * 发送请求，同步等待响应
+    */
   private def sendRequest(apiKey: ApiKeys, apiVersion: Option[Short], request: AbstractRequest): ClientResponse = {
     import kafka.utils.NetworkClientBlockingOps._
     val header = apiVersion.fold(networkClient.nextRequestHeader(apiKey))(networkClient.nextRequestHeader(apiKey, _))
@@ -250,6 +257,8 @@ class ReplicaFetcherThread(name: String,
       else {
         val send = new RequestSend(sourceBroker.id.toString, header, request.toStruct)
         val clientRequest = new ClientRequest(time.milliseconds(), true, send, null)
+
+        // 同步的发送消息，阻塞直到有响应
         networkClient.blockingSendAndReceive(clientRequest)(time)
       }
     }
@@ -283,6 +292,16 @@ class ReplicaFetcherThread(name: String,
     }
   }
 
+  /**
+    * 最多可以拉取 1m 的数据，最少是 1 kb
+    * 如果小于 1kb，最多可以等待 500ms
+    * 如果 Broker 处理 fetch 请求的时候发现，当前 Broker 可以发送的数据小于 1kb
+    * 那就会延时调度 500ms，如果 500ms 之后还没有新的数据到达 Leader，就直接返回
+    * 通过延时的时间轮，可以让 Leader Partition 对应的 Broker 通过延时调度来把这 500ms 内的 最多 1mb 的数据消息发送过来
+    *
+    * @param partitionMap key 是 topic 和 partition 信息，value 是 offset 的值，下次从哪个 offset 开始拉取
+    * @return
+    */
   protected def buildFetchRequest(partitionMap: Seq[(TopicPartition, PartitionFetchState)]): FetchRequest = {
     val requestMap = new util.LinkedHashMap[TopicPartition, JFetchRequest.PartitionData]
 
@@ -294,6 +313,9 @@ class ReplicaFetcherThread(name: String,
     }
 
     val request =
+      // maxWait 最多等待多久，默认 500ms
+      // minBytes 最少拉取多少，默认 1kb，如果 500ms 之内一直不能到达 1kb，那就直接返回，有延时调度机制
+      // maxBytes 最大拉取多少，默认 1mb
       if (fetchRequestVersion >= 3) JFetchRequest.fromReplica(replicaId, maxWait, minBytes, maxBytes, requestMap)
       else JFetchRequest.fromReplica(replicaId, maxWait, minBytes, requestMap)
 

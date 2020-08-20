@@ -558,6 +558,7 @@ class Log(val dir: File,
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
 
+    // 根据 offset 获取要读取的日志段
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
@@ -573,6 +574,7 @@ class Log(val dir: File,
       // cause OffsetOutOfRangeException. To solve that, we cap the reading up to exposed position instead of the log
       // end of the active segment.
       val maxPosition = {
+        // 如果是最新的日志段的花
         if (entry == segments.lastEntry) {
           val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
           // Check the segment again in case a new segment has just rolled out.
@@ -585,6 +587,8 @@ class Log(val dir: File,
           entry.getValue.size
         }
       }
+
+      // 具体还是从这里来读取
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition, minOneMessage)
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)

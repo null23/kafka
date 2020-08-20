@@ -89,6 +89,13 @@ abstract class AbstractFetcherThread(name: String,
 
   override def doWork() {
 
+    // 针对这个 Broker 上的一批 Follower 构建了一个 fetchRequest
+    // 告诉 Broker 说，有一批 follower 分区要拉取数据
+    // 肯定是这批 Follower 的 Leader 都在这个 Broker 上
+
+    // 创建 fetch 请求，告诉 Broker 是从哪个 Offset 开始拉取，拉取多少个字节的数据
+    // 默认是每次最多拉取 1m 的数据，最少拉取 1kb 的数据
+    // 如果请求达到 Broker 之后，Broker 处理的时候发现没有任何的消息可以拉取（小于 1kb），那就开启延时调度线程等待 500ms 后在 check
     val fetchRequest = inLock(partitionMapLock) {
       val fetchRequest = buildFetchRequest(partitionStates.partitionStates.asScala.map { state =>
         state.topicPartition -> state.value
@@ -100,9 +107,13 @@ abstract class AbstractFetcherThread(name: String,
       fetchRequest
     }
     if (!fetchRequest.isEmpty)
+      // 采用同步的方式发送请求出去，必须等到响应获取到才可以
       processFetchRequest(fetchRequest)
   }
 
+  /**
+    * 处理 fetch 请求
+    */
   private def processFetchRequest(fetchRequest: REQ) {
     val partitionsWithError = mutable.Set[TopicPartition]()
 
@@ -115,6 +126,8 @@ abstract class AbstractFetcherThread(name: String,
 
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
+
+      // 获取 fetch 响应结果
       responseData = fetch(fetchRequest)
     } catch {
       case t: Throwable =>
@@ -131,6 +144,8 @@ abstract class AbstractFetcherThread(name: String,
     }
     fetcherStats.requestRate.mark()
 
+    // 处理 fetch 的响应结果，写磁盘
+    // 更新 LEO
     if (responseData.nonEmpty) {
       // process fetched data
       inLock(partitionMapLock) {

@@ -541,6 +541,7 @@ class ReplicaManager(val config: KafkaConfig,
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
     // read from local logs
+    // 从 Broker 的本地的 .log 中读取数据
     val logReadResults = readFromLocalLog(
       replicaId = replicaId,
       fetchOnlyFromLeader = fetchOnlyFromLeader,
@@ -594,6 +595,7 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
    * Read from multiple topic partitions at the given offset up to maxSize bytes
+    * 从 .log 读取数据
    */
   def readFromLocalLog(replicaId: Int,
                        fetchOnlyFromLeader: Boolean,
@@ -616,6 +618,7 @@ class ReplicaManager(val config: KafkaConfig,
           (if (minOneMessage) s", ignoring response/partition size limits" else ""))
 
         // decide whether to only fetch from leader
+        // 从哪个 log（物理的文件夹）开始读取
         val localReplica = if (fetchOnlyFromLeader)
           getLeaderReplicaIfLocal(topic, partition)
         else
@@ -639,6 +642,7 @@ class ReplicaManager(val config: KafkaConfig,
             val adjustedFetchSize = math.min(fetchSize, limitBytes)
 
             // Try the read first, this tells us whether we need all of adjustedFetchSize for this partition
+            // 读取
             val fetch = log.read(offset, adjustedFetchSize, maxOffsetOpt, minOneMessage)
 
             // If the partition is being throttled, simply return an empty set.
@@ -867,11 +871,23 @@ class ReplicaManager(val config: KafkaConfig,
    * Make the current broker to become follower for a given set of partitions by:
    *
    * 1. Remove these partitions from the leader partitions set.
+   * 既然这些分区是 Follower，那么就把这些 Broker 从维护的 Leader Partition 数据结构中移除
+   *
    * 2. Mark the replicas as followers so that no more data can be added from the producer clients.
+   * 将当前 Broker 的该副本标记为 Follower，这样就不会有任何 Producer 向这个副本写数据了
+   *
    * 3. Stop fetchers for these partitions so that no more data can be added by the replica fetcher threads.
+   * 停止掉这些分区已有的 fetcher 线程，保证暂时先别用已有的 fetcher 线程去拉取数据
+   * 因为可能由于 leader 变了，就得从新的 leader 拉取数据了
+   *
    * 4. Truncate the log and checkpoint offsets for these partitions.
+   * Truncate 这些分区的日志，记录下来这些分区的 offsets
+   *
    * 5. Clear the produce and fetch requests in the purgatory
+   * 清理掉延时调度的请求
+   *
    * 6. If the broker is not shutting down, add the fetcher to the new leaders.
+   * 给新的副本添加对应的 fetcher
    *
    * The ordering of doing these steps make sure that the replicas in transition will not
    * take any more messages before checkpointing offsets so that all messages before the checkpoint
@@ -880,6 +896,15 @@ class ReplicaManager(val config: KafkaConfig,
    * If an unexpected error is thrown in this function, it will be propagated to KafkaApis where
    * the error message will be set on each partition since we do not know which partition caused it. Otherwise,
    * return the set of partitions that are made follower due to this method
+   *
+   * 什么时候会调用这个方法？
+   * 应该是当一个 Broker 感知到了自己被分配了一些 follower 分区之后
+   * 可能就会来调用这个方法，这里就会为同一批 follower 分区创建一个 fetcher 线程
+   *
+   * 接下来，fetcher 的线程就会拉取数据到本地副本。
+   *
+   * 其实这个方法的目的，就是让这个 Broker 变成一个 Follower，经过一些元数据的准备，这个 Broker 肯定是只要 Leader Partition 的信息的
+   * 只要让这个 Broker 变成 Follower，并且开启 Fetcher 线程从 Leader 拉取数据就行了
    */
   private def makeFollowers(controllerId: Int,
                             epoch: Int,
