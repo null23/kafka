@@ -113,6 +113,9 @@ class ReplicaFetcherThread(name: String,
   }
 
   // process fetched data
+  /**
+    * 处理 fetch 到的数据
+    */
   def processPartitionData(topicPartition: TopicPartition, fetchOffset: Long, partitionData: PartitionData) {
     try {
       val topic = topicPartition.topic
@@ -127,14 +130,22 @@ class ReplicaFetcherThread(name: String,
       if (logger.isTraceEnabled)
         trace("Follower %d has replica log end offset %d for partition %s. Received %d messages and leader hw %d"
           .format(replica.brokerId, replica.logEndOffset.messageOffset, topicPartition, messageSet.sizeInBytes, partitionData.highWatermark))
+
+      // 写入 fetch 到的数据到日志
       replica.log.get.append(messageSet, assignOffsets = false)
       if (logger.isTraceEnabled)
         trace("Follower %d has replica log end offset %d after appending %d bytes of messages for partition %s"
           .format(replica.brokerId, replica.logEndOffset.messageOffset, messageSet.sizeInBytes, topicPartition))
+
+      // 根据 fetch 到的数据更新 Follower 的 HW
+      // 取 Leader 的 HW 和 Follower 的 LEO 的最小值
+      // 比如 Leader LEO=25560，HW=24965，Follower LEO=23987，那么 Follower 的 HW 肯定不能超过 Follower 的 LEO
       val followerHighWatermark = replica.logEndOffset.messageOffset.min(partitionData.highWatermark)
       // for the follower replica, we do not need to keep
       // its segment base offset the physical position,
       // these values will be computed upon making the leader
+
+      // 更新 LEO，就是 fetch 到的 lastOffset + 1
       replica.highWatermark = new LogOffsetMetadata(followerHighWatermark)
       if (logger.isTraceEnabled)
         trace("Follower %d set replica high watermark for partition [%s,%d] to %s"

@@ -160,16 +160,20 @@ abstract class AbstractFetcherThread(name: String,
                 case Errors.NONE =>
                   try {
                     val messages = partitionData.toByteBufferMessageSet
+                    // fetch 到的数据的最新的 offset
                     val newOffset = messages.shallowIterator.toSeq.lastOption.map(_.nextOffset).getOrElse(
                       currentPartitionFetchState.offset)
 
                     fetcherLagStats.getAndMaybePut(topic, partitionId).lag = Math.max(0L, partitionData.highWatermark - newOffset)
+
                     // Once we hand off the partition data to the subclass, we can't mess with it any more in this thread
+                    // 核心的逻辑，处理 fetch 到的分区的数据
                     processPartitionData(topicPartition, currentPartitionFetchState.offset, partitionData)
 
                     val validBytes = messages.validBytes
                     if (validBytes > 0) {
                       // Update partitionStates only if there is no exception during processPartitionData
+                      // 更新当前分区的 offset
                       partitionStates.updateAndMoveToEnd(topicPartition, new PartitionFetchState(newOffset))
                       fetcherStats.byteRate.mark(validBytes)
                     }
