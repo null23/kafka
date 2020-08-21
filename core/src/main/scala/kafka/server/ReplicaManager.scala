@@ -984,6 +984,8 @@ class ReplicaManager(val config: KafkaConfig,
           new TopicPartition(partition.topic, partition.partitionId) -> BrokerAndInitialOffset(
             metadataCache.getAliveBrokers.find(_.id == partition.leaderReplicaIdOpt.get).get.getBrokerEndPoint(config.interBrokerSecurityProtocol),
             partition.getReplica().get.logEndOffset.messageOffset)).toMap
+
+        // 为新的 Follower 创建 fetcher 线程
         replicaFetcherManager.addFetcherForPartitions(partitionsToMakeFollowerWithLeaderAndOffset)
 
         partitionsToMakeFollower.foreach { partition =>

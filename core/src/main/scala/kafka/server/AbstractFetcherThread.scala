@@ -127,7 +127,7 @@ abstract class AbstractFetcherThread(name: String,
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
 
-      // 获取 fetch 响应结果
+      // 获取 fetch 响应结果，对于这里是同步阻塞获取 fetch 响应结果的
       responseData = fetch(fetchRequest)
     } catch {
       case t: Throwable =>
