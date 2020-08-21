@@ -545,6 +545,9 @@ class Log(val dir: File,
    * @param maxOffset The offset to read up to, exclusive. (i.e. this offset NOT included in the resulting message set)
    * @param minOneMessage If this is true, the first message will be returned even if it exceeds `maxLength` (if one exists)
    *
+    * 从具体的物理文件夹读取数据
+    * 需要根据请求过来的 逻辑offset 根据 .index稀疏索引 通过 二分查找法，定位到某个日志段的 物理offset 上
+    *
    * @throws OffsetOutOfRangeException If startOffset is beyond the log end offset or before the base offset of the first segment.
    * @return The fetch data information including fetch starting offset metadata and messages read.
    */
@@ -558,7 +561,7 @@ class Log(val dir: File,
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
 
-    // 根据 offset 获取要读取的日志段
+    // 根据 逻辑offset 获取要读取的日志段
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
@@ -574,7 +577,7 @@ class Log(val dir: File,
       // cause OffsetOutOfRangeException. To solve that, we cap the reading up to exposed position instead of the log
       // end of the active segment.
       val maxPosition = {
-        // 如果是最新的日志段的花
+        // 如果是最新的日志段
         if (entry == segments.lastEntry) {
           val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
           // Check the segment again in case a new segment has just rolled out.
@@ -588,7 +591,7 @@ class Log(val dir: File,
         }
       }
 
-      // 具体还是从这里来读取
+      // 具体还是从这里来读取，根据 逻辑offset 从日志段对应的 .index稀疏索引 进行二分查找定位到具体的 物理offset
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition, minOneMessage)
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)

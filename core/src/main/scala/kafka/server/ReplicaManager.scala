@@ -527,6 +527,7 @@ class ReplicaManager(val config: KafkaConfig,
   /**
    * Fetch messages from the leader replica, and wait until enough data can be fetched and return;
    * the callback function will be triggered either when timeout or required fetch info is satisfied
+    * 从 Leader 的本地磁盘/os cache 读取文件
    */
   def fetchMessages(timeout: Long,
                     replicaId: Int,
@@ -637,6 +638,8 @@ class ReplicaManager(val config: KafkaConfig,
          * This can cause a replica to always be out of sync.
          */
         val initialLogEndOffset = localReplica.logEndOffset
+
+        // logReadInfo 是一个具体的物理文件夹
         val logReadInfo = localReplica.log match {
           case Some(log) =>
             val adjustedFetchSize = math.min(fetchSize, limitBytes)
