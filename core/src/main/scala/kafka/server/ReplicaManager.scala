@@ -527,9 +527,11 @@ class ReplicaManager(val config: KafkaConfig,
   /**
    * Fetch messages from the leader replica, and wait until enough data can be fetched and return;
    * the callback function will be triggered either when timeout or required fetch info is satisfied
-    * 从 Leader 的本地磁盘/os cache 读取文件
+    * 从 Leader 的本地磁盘/os cache 读取数据
    */
   def fetchMessages(timeout: Long,
+
+                   // follower 的 replicaId
                     replicaId: Int,
                     fetchMinBytes: Int,
                     fetchMaxBytes: Int,
@@ -555,6 +557,7 @@ class ReplicaManager(val config: KafkaConfig,
     // if the fetch comes from the follower,
     // update its corresponding log end offset
     if(Request.isValidBrokerId(replicaId))
+      // todo 这里修改了 leader 的 HW 和 ISR？
       updateFollowerLogReadResults(replicaId, logReadResults)
 
     // check if this fetch request can be satisfied right away
@@ -1020,6 +1023,9 @@ class ReplicaManager(val config: KafkaConfig,
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))
   }
 
+  /**
+    * todo 感觉是个重要的方法
+    */
   private def updateFollowerLogReadResults(replicaId: Int, readResults: Seq[(TopicAndPartition, LogReadResult)]) {
     debug("Recording follower broker %d log read results: %s ".format(replicaId, readResults))
     readResults.foreach { case (topicAndPartition, readResult) =>

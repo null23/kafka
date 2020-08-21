@@ -740,6 +740,7 @@ class Log(val dir: File,
 
   /**
    * The offset metadata of the next message that will be appended to the log
+    * 其实就是 LEO
    */
   def logEndOffsetMetadata: LogOffsetMetadata = nextOffsetMetadata
 

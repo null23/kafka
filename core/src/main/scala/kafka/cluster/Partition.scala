@@ -260,22 +260,32 @@ class Partition(val topic: String,
    * Check and maybe expand the ISR of the partition.
    *
    * This function can be triggered when a replica's LEO has incremented
+    * @param replicaId follower 的 replicaId
    */
   def maybeExpandIsr(replicaId: Int) {
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       // check if this replica needs to be added to the ISR
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          // follower replica
           val replica = getReplica(replicaId).get
+
+          // leader 的 HW
           val leaderHW = leaderReplica.highWatermark
+
+          // follower replica 不在 ISR 列表里 && follower 的 LEO > Leader 的 HW
           if(!inSyncReplicas.contains(replica) &&
              assignedReplicas.map(_.brokerId).contains(replicaId) &&
                   replica.logEndOffset.offsetDiff(leaderHW) >= 0) {
+
+            // 把这个 follower 加入当前 Leader 的 ISR 列表中
             val newInSyncReplicas = inSyncReplicas + replica
             info("Expanding ISR for partition [%s,%d] from %s to %s"
                          .format(topic, partitionId, inSyncReplicas.map(_.brokerId).mkString(","),
                                  newInSyncReplicas.map(_.brokerId).mkString(",")))
+
             // update ISR in ZK and cache
+            // 更新
             updateIsr(newInSyncReplicas)
             replicaManager.isrExpandRate.mark()
           }
@@ -466,8 +476,14 @@ class Partition(val topic: String,
     info
   }
 
+  /**
+    * 更新相关元数据信息
+    * @param newIsr 新的 ISR 列表
+    */
   private def updateIsr(newIsr: Set[Replica]) {
     val newLeaderAndIsr = new LeaderAndIsr(localBrokerId, leaderEpoch, newIsr.map(r => r.brokerId).toList, zkVersion)
+
+    // 更新 Broker 本地的元数据相关信息，以及 zk 上的元数据信息
     val (updateSucceeded,newVersion) = ReplicationUtils.updateLeaderAndIsr(zkUtils, topic, partitionId,
       newLeaderAndIsr, controllerEpoch, zkVersion)
 
