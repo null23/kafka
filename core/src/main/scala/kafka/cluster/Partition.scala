@@ -242,6 +242,7 @@ class Partition(val topic: String,
         replica.updateLogReadResult(logReadResult)
         // check if we need to expand ISR to include this replica
         // if it is not in the ISR yet
+        // 可能重新根据同步的结果把当前 Follower 加入 ISR 列表
         maybeExpandIsr(replicaId)
 
         debug("Recorded replica %d log end offset (LEO) position %d for partition %s."
@@ -277,6 +278,7 @@ class Partition(val topic: String,
           val leaderHW = leaderReplica.highWatermark
 
           // follower replica 不在 ISR 列表里 && follower 的 LEO > Leader 的 HW
+          // 重新把当前 Follower 加入 Leader 的 ISR 列表
           if(!inSyncReplicas.contains(replica) &&
              assignedReplicas.map(_.brokerId).contains(replicaId) &&
                   replica.logEndOffset.offsetDiff(leaderHW) >= 0) {
@@ -295,6 +297,7 @@ class Partition(val topic: String,
 
           // check if the HW of the partition can now be incremented
           // since the replica maybe now be in the ISR and its LEO has just incremented
+          // 可能会更新 Leader 的 HW
           maybeIncrementLeaderHW(leaderReplica)
 
         case None => false // nothing to do if no longer leader
@@ -362,9 +365,14 @@ class Partition(val topic: String,
    * Returns true if the HW was incremented, and false otherwise.
    * Note There is no need to acquire the leaderIsrUpdate lock here
    * since all callers of this private API acquire that lock
+    *
+    * 更新 Leader 的 LEO
    */
   private def maybeIncrementLeaderHW(leaderReplica: Replica): Boolean = {
+    // ISR 列表中所有副本的 LEO
     val allLogEndOffsets = inSyncReplicas.map(_.logEndOffset)
+
+    // 获取 ISR 列表中所有副本的 LEO 的最小值
     val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
     val oldHighWatermark = leaderReplica.highWatermark
     if (oldHighWatermark.messageOffset < newHighWatermark.messageOffset || oldHighWatermark.onOlderSegment(newHighWatermark)) {
@@ -387,12 +395,18 @@ class Partition(val topic: String,
     replicaManager.tryCompleteDelayedProduce(requestKey)
   }
 
+  /**
+    * 维护 ISR 列表
+    */
   def maybeShrinkIsr(replicaMaxLagTimeMs: Long) {
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          // 获取到落后的 follower 副本
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.nonEmpty) {
+
+            // 把落后的 follower 踢出 ISR 列表
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
             assert(newInSyncReplicas.nonEmpty)
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
@@ -402,6 +416,8 @@ class Partition(val topic: String,
             // we may need to increment high watermark since ISR could be down to 1
 
             replicaManager.isrShrinkRate.mark()
+
+            // 更新 Leader 的 HW
             maybeIncrementLeaderHW(leaderReplica)
           } else {
             false
@@ -416,11 +432,25 @@ class Partition(val topic: String,
       tryCompleteDelayedRequests()
   }
 
+  /**
+    * 把一些 Followers 踢出 ISR 列表
+    */
   def getOutOfSyncReplicas(leaderReplica: Replica, maxLagMs: Long): Set[Replica] = {
     /**
      * there are two cases that will be handled here -
+      *
+      * 对于一个 Follower 而言，如果超过 10s 都没有发起过任何一次 fetch 请求
+      * 就说明这个 follower 被卡住了，一般来说有两种情况：
+      * 1.follower 所在的 broker 挂了
+      * 2.follower 所在的 jvm fullgc 卡顿了
+      *
      * 1. Stuck followers: If the leo of the replica hasn't been updated for maxLagMs ms,
      *                     the follower is stuck and should be removed from the ISR
+      *
+      *
+      * 在 10s 之内，都没有办法跟进到最新的 LEO，就说明 follower 太慢了
+      * 一般来说，是因为 Kafka 部署的机器负载过高，导致网络负载太高，网络性能不佳
+      * 导致 follower 同步过满
      * 2. Slow followers: If the replica has not read up to the leo within the last maxLagMs ms,
      *                    then the follower is lagging and should be removed from the ISR
      * Both these cases are handled by checking the lastCaughtUpTimeMs which represents

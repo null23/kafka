@@ -176,6 +176,8 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
    * be added to the watch list of the remaining keys. The expiration reaper thread will
    * remove this operation from any watcher list in which the operation exists.
    *
+    * 阻塞最多 500ms，延时调度 fetch 消息
+    *
    * @param operation the delayed operation to be checked
    * @param watchKeys keys for bookkeeping the operation
    * @return true iff the delayed operations can be completed by the caller

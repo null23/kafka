@@ -571,11 +571,14 @@ class ReplicaManager(val config: KafkaConfig,
     //                        2) fetch request does not require any data
     //                        3) has enough data to respond
     //                        4) some error happens while reading data
+    // fetch 读取成功
     if (timeout <= 0 || fetchInfos.isEmpty || bytesReadable >= fetchMinBytes || errorReadingData) {
       val fetchPartitionData = logReadResults.map { case (tp, result) =>
         tp -> FetchResponsePartitionData(result.errorCode, result.hw, result.info.messageSet)
       }
       responseCallback(fetchPartitionData)
+
+      // fetch 失败，比如没有 fetch 到指定大小的消息数据
     } else {
       // construct the fetch results from the read results
       val fetchPartitionStatus = logReadResults.map { case (topicAndPartition, result) =>
@@ -594,6 +597,7 @@ class ReplicaManager(val config: KafkaConfig,
       // try to complete the request immediately, otherwise put it into the purgatory;
       // this is because while the delayed fetch operation is being created, new requests
       // may arrive and hence make this operation completable.
+      // 延时调度，最多等待500ms
       delayedFetchPurgatory.tryCompleteElseWatch(delayedFetch, delayedFetchKeys)
     }
   }
@@ -1042,6 +1046,10 @@ class ReplicaManager(val config: KafkaConfig,
 
           // for producer requests with ack > 1, we need to check
           // if they can be unblocked after some follower's log end offsets have moved
+          // 如果 acks = -1，Leader Partition 就必须等到所有的 Follower 同步到数据之后才能返回
+          // 假使  acks = -1，Leader 在处理请求之后，就会把响应返回这个操作，放入延时调度的 scheduler 里，延时 30s 返回
+          // 这里是提前提醒 Leader Partition，有一个 Follower 已经 fetch 完成了
+          // 如果所有的 Follower 都提醒了 Leader Partition，那么可以提前唤醒延时调度里的线程
           tryCompleteDelayedProduce(new TopicPartitionOperationKey(topicAndPartition))
         case None =>
           warn("While recording the replica LEO, the partition %s hasn't been created.".format(topicAndPartition))
