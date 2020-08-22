@@ -83,8 +83,12 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
         fetcherThreadMap.get(brokerAndFetcherId) match {
           case Some(f) => fetcherThread = f
           case None =>
+
+            // 创建 fetcher 线程
             fetcherThread = createFetcherThread(brokerAndFetcherId.fetcherId, brokerAndFetcherId.broker)
             fetcherThreadMap.put(brokerAndFetcherId, fetcherThread)
+
+            // 启动 fetcher 线程
             fetcherThread.start
         }
 
