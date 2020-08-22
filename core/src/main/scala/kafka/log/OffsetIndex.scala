@@ -81,6 +81,8 @@ class OffsetIndex(file: File, baseOffset: Long, maxIndexSize: Int = -1)
    * @return The offset found and the corresponding file position for this offset
    *         If the target offset is smaller than the least entry in the index (or the index is empty),
    *         the pair (baseOffset, 0) is returned.
+    *
+    * 通过 逻辑offset 定位到 物理offset
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {

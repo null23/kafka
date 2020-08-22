@@ -131,6 +131,7 @@ class ReplicaFetcherThread(name: String,
         trace("Follower %d has replica log end offset %d for partition %s. Received %d messages and leader hw %d"
           .format(replica.brokerId, replica.logEndOffset.messageOffset, topicPartition, messageSet.sizeInBytes, partitionData.highWatermark))
 
+      // 核心
       // 写入 fetch 到的数据到日志
       replica.log.get.append(messageSet, assignOffsets = false)
       if (logger.isTraceEnabled)
