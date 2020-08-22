@@ -49,7 +49,12 @@ class Replica(val brokerId: Int,
 
   def lastCaughtUpTimeMs = lastCaughtUpTimeMsUnderlying.get()
 
+  /**
+    * 更新 Follower 的 LEO
+    */
   def updateLogReadResult(logReadResult : LogReadResult) {
+    // 这个 Replica副本 实例其实就是 Follower 本身
+    // 把成员属性 logEndOffset LEO 更新为 这次 fetch 到的最后一个 offset
     logEndOffset = logReadResult.info.fetchOffsetMetadata
 
     /* If the request read up to the log end offset snapshot when the read was initiated,

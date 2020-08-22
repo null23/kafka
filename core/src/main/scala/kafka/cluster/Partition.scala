@@ -232,10 +232,13 @@ class Partition(val topic: String,
 
   /**
    * Update the log end offset of a certain replica of this partition
+    * 更新 Follower 的 LEO
+    * 更新 ISR 列表
    */
   def updateReplicaLogReadResult(replicaId: Int, logReadResult: LogReadResult) {
     getReplica(replicaId) match {
       case Some(replica) =>
+        // 更新 Follower 的 LEO
         replica.updateLogReadResult(logReadResult)
         // check if we need to expand ISR to include this replica
         // if it is not in the ISR yet
