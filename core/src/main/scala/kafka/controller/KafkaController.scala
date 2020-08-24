@@ -160,15 +160,28 @@ object KafkaController extends Logging {
 class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerState: BrokerState, time: Time, metrics: Metrics, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
   this.logIdent = "[Controller " + config.brokerId + "]: "
   private var isRunning = true
+
+  /**
+    * 状态机
+    */
   private val stateChangeLogger = KafkaController.stateChangeLogger
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
   val partitionStateMachine = new PartitionStateMachine(this)
   val replicaStateMachine = new ReplicaStateMachine(this)
+
+  /**
+    * Controller 选举的组件
+    */
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
   // kafka server
+
+  /**
+    * 自动重平衡的组件
+    */
   private val autoRebalanceScheduler = new KafkaScheduler(1)
+
   var deleteTopicManager: TopicDeletionManager = null
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
   private val reassignedPartitionLeaderSelector = new ReassignedPartitionLeaderSelector(controllerContext)
@@ -667,12 +680,18 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * Invoked when the controller module of a Kafka server is started up. This does not assume that the current broker
    * is the controller. It merely registers the session expiration listener and starts the controller leader
    * elector
+    *
+    * 抢注成为 Controller
    */
   def startup() = {
     inLock(controllerContext.controllerLock) {
       info("Controller starting up")
+
+      // 注册跟 ZK 会话断开的监听器
       registerSessionExpirationListener()
       isRunning = true
+
+      // 竞争成为 Controller
       controllerElector.startup
       info("Controller startup complete")
     }

@@ -194,9 +194,15 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         brokerState.newState(Starting)
 
         /* start scheduler */
+        /**
+          * 延时调度的 scheduler，封装了一个线程池
+          */
         kafkaScheduler.startup()
 
         /* setup zookeeper */
+        /**
+          * 初始化 zk，Kafka 通过 zk 来管理元数据
+          */
         zkUtils = initZk()
 
         /* Get or create cluster_id */
@@ -218,10 +224,16 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
         metadataCache = new MetadataCache(config.brokerId)
 
+        /**
+          * 网络通信组件
+          */
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
         /* start replica manager */
+        /**
+          * 副本管理组件，里边封装了 LogManager
+          */
         // 负责把消息写入磁盘
         // logManager 是真正负责把消息写入磁盘的，replicaManager 其实是在上边封装了一套
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
@@ -231,12 +243,21 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         replicaManager.startup()
 
         /* start kafka controller */
+        /**
+          * Broker 集群启动的时候，会有一个 KafkaController
+          * 其他 Broker 会监视着，一旦 Controller 对应的 Broker 挂了，其他人会尝试成为新的 Controller
+          */
+        // 初始化 KafkaController
         kafkaController = new KafkaController(config, zkUtils, brokerState, kafkaMetricsTime, metrics, threadNamePrefix)
+        // 争抢注册 KafkaController
         kafkaController.startup()
 
         adminManager = new AdminManager(config, metrics, metadataCache, zkUtils)
 
         /* start group coordinator */
+        /**
+          * 负责管理消费者的组件
+          */
         groupCoordinator = GroupCoordinator(config, zkUtils, replicaManager, kafkaMetricsTime)
         groupCoordinator.startup()
 
@@ -248,6 +269,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         }
 
         /* start processing requests */
+        /**
+          * 根据请求的类型处理网络请求
+          */
         // 请求的类型
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, adminManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers, clusterId)
@@ -274,6 +298,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           else
             (protocol, endpoint)
         }
+
+        /**
+          * 监控 Kafka Broker 健康的组件
+          */
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
           config.interBrokerProtocolVersion)
         kafkaHealthcheck.startup()
@@ -307,6 +335,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     clusterResourceListeners.onUpdate(new ClusterResource(clusterId))
   }
 
+  /**
+    * 初始化 zk
+    */
   private def initZk(): ZkUtils = {
     info(s"Connecting to zookeeper on ${config.zkConnect}")
 

@@ -44,13 +44,32 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     controllerContext.zkUtils.makeSurePersistentPathExists(electionPath.substring(0, index))
   val leaderChangeListener = new LeaderChangeListener
 
+  /**
+    * 注册 Controller
+    */
   def startup {
     inLock(controllerContext.controllerLock) {
+      /**
+        * 在 electionPath 这个路径上注册一个监听器
+        * 如果有人竞争成为了 Controller，他会感知到
+        * 如果有 Controller 挂了，他也能感知到
+        */
+      // electionPath 是 zk 里 ZNode 的路径
       controllerContext.zkUtils.zkClient.subscribeDataChanges(electionPath, leaderChangeListener)
+
+      /**
+        * 发起一个选举
+        */
       elect
     }
   }
 
+  /**
+    * 从 zk 上的 "/controller" ZNode 读取值
+    * 如果存在值，则说明有人竞争成为了 Controller
+    * 如果不存在值，则返回 -1
+    * @return
+    */
   private def getControllerID(): Int = {
     controllerContext.zkUtils.readDataMaybeNull(electionPath)._1 match {
        case Some(controller) => KafkaController.parseControllerId(controller)
@@ -58,15 +77,25 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     }
   }
 
+  /**
+    * 发起在 zk 上的选举
+    * 其实就是多个 Broker 抢着创建一个 "/controller" 节点
+    * @return
+    */
   def elect: Boolean = {
     val timestamp = SystemTime.milliseconds.toString
     val electString = Json.encode(Map("version" -> 1, "brokerid" -> brokerId, "timestamp" -> timestamp))
-   
-   leaderId = getControllerID 
+
+    /**
+      * 从 zk 上获取 "/controller" 这个 ZNode 的值
+      */
+    leaderId = getControllerID
     /* 
      * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential race condition, 
      * it's possible that the controller has already been elected when we get here. This check will prevent the following 
      * createEphemeralPath method from getting into an infinite loop if this broker is already the controller.
+     *
+     * 集群里已经有人成为 Controller 了
      */
     if(leaderId != -1) {
        debug("Broker %d has been elected as leader, so stopping the election process.".format(leaderId))
@@ -74,15 +103,26 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     }
 
     try {
+      // 由于其他 Broker 还没有注册成功，因此当前 Broker 就尝试注册
+      // 这里会有并发竞争注册的情况
+      // 这个理解为一个 zk 的节点，尝试去创建 "controller" znode
       val zkCheckedEphemeral = new ZKCheckedEphemeral(electionPath,
                                                       electString,
                                                       controllerContext.zkUtils.zkConnection.getZookeeper,
                                                       JaasUtils.isZkSecurityEnabled())
+
+      // 尝试去 "/controller" znode 目录下创建一个节点
+      // 当然有可能会失败，因为这里是分布式环境下多个 Broker 同时竞争的
+      // 如果失败，就会被下边的 cache 捕获到异常
       zkCheckedEphemeral.create()
       info(brokerId + " successfully elected as leader")
+
+      // 当前的 leaderId 设置为当前的 BrokerId，也就是这个 Broker 成功的成为了 Controller
       leaderId = brokerId
+
       onBecomingLeader()
     } catch {
+      // 有其他 Broker 已经注册了
       case e: ZkNodeExistsException =>
         // If someone else has written the path, then
         leaderId = getControllerID 
