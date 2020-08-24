@@ -49,6 +49,10 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   private val controllerId = controller.config.brokerId
   private val zkUtils = controllerContext.zkUtils
   private val replicaState: mutable.Map[PartitionAndReplica, ReplicaState] = mutable.Map.empty
+
+  /**
+    * 监听 znode "/brokers/ids" 变化的回调函数
+    */
   private val brokerChangeListener = new BrokerChangeListener()
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(controller)
   private val hasStarted = new AtomicBoolean(false)
@@ -74,6 +78,9 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   }
 
   // register ZK listeners of the replica state machine
+  /**
+    * 监听 "/brokers/ids" 父目录下的所有节点
+    */
   def registerListeners() {
     // register broker change listener
     registerBrokerChangeListener()
@@ -347,9 +354,16 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
 
   /**
    * This is the zookeeper listener that triggers all the state transitions for a replica
+    *
+    * 监听 znode "/brokers/ids" 父目录变更的回调函数
    */
   class BrokerChangeListener() extends IZkChildListener with Logging {
     this.logIdent = "[BrokerChangeListener on Controller " + controller.config.brokerId + "]: "
+
+
+    /**
+      * znode "/brokers/ids" 父目录变更的回调函数
+      */
     def handleChildChange(parentPath : String, currentBrokerList : java.util.List[String]) {
       info("Broker change listener fired for path %s with children %s".format(parentPath, currentBrokerList.sorted.mkString(",")))
       inLock(controllerContext.controllerLock) {
@@ -359,8 +373,13 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val curBrokers = currentBrokerList.map(_.toInt).toSet.flatMap(zkUtils.getBrokerInfo)
               val curBrokerIds = curBrokers.map(_.id)
               val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
+
+              // 新注册的 BrokerId
               val newBrokerIds = curBrokerIds -- liveOrShuttingDownBrokerIds
+
+              // 宕机或者下线的 BrokerId
               val deadBrokerIds = liveOrShuttingDownBrokerIds -- curBrokerIds
+
               val newBrokers = curBrokers.filter(broker => newBrokerIds(broker.id))
               controllerContext.liveBrokers = curBrokers
               val newBrokerIdsSorted = newBrokerIds.toSeq.sorted
@@ -368,9 +387,15 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val liveBrokerIdsSorted = curBrokerIds.toSeq.sorted
               info("Newly added brokers: %s, deleted brokers: %s, all live brokers: %s"
                 .format(newBrokerIdsSorted.mkString(","), deadBrokerIdsSorted.mkString(","), liveBrokerIdsSorted.mkString(",")))
+
+              // 和 Controller 进行网络通信，根据新注册的 BrokerIds 维护元数据信息，把元数据同步过去
               newBrokers.foreach(controllerContext.controllerChannelManager.addBroker)
+
+              // 和 Controller 进行网络通信，根据下线或者宕机的 BrokerIds 维护元数据信息，把元数据同步过去
               deadBrokerIds.foreach(controllerContext.controllerChannelManager.removeBroker)
               if(newBrokerIds.nonEmpty)
+
+                // 处理新加入进来的 Broker
                 controller.onBrokerStartup(newBrokerIdsSorted)
               if(deadBrokerIds.nonEmpty)
                 controller.onBrokerFailure(deadBrokerIdsSorted)

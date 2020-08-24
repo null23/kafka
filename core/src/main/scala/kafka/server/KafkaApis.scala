@@ -82,9 +82,13 @@ class KafkaApis(val requestChannel: RequestChannel,
         // 处理 Follower 的 fetch 请求
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
+
+        // 获取所有的 Broker ，以及 Broker 上的 Partition 的分布情况等相关的元数据信息，用于创建 Topic 时在每个 Broker 上均匀分配 Partition
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
         case ApiKeys.LEADER_AND_ISR => handleLeaderAndIsrRequest(request)
         case ApiKeys.STOP_REPLICA => handleStopReplicaRequest(request)
+
+        // 上线/下线 了一个 Broker，同步元数据信息过来的请求
         case ApiKeys.UPDATE_METADATA_KEY => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN_KEY => handleControlledShutdownRequest(request)
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
@@ -837,6 +841,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Handle a topic metadata request
+    * 获取所有的 Topic 的元数据信息
    */
   def handleTopicMetadataRequest(request: RequestChannel.Request) {
     val metadataRequest = request.body.asInstanceOf[MetadataRequest]

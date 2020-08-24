@@ -171,6 +171,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
 
   /**
     * Controller 选举的组件
+    *
+    * 封装了其他 Broker 通知 Controller 的组件 onControllerFailover，其他 Broker 注册完毕之后会通知 Controller
     */
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
@@ -329,11 +331,17 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 2. Increments the controller epoch
    * 3. Initializes the controller's context object that holds cache objects for current topics, live brokers and
    *    leaders for all existing partitions.
-   * 4. Starts the controller's channel manager
-   * 5. Starts the replica state machine
-   * 6. Starts the partition state machine
+    *
+   * 4. Starts the controller's channel manager   维护跟其他 Broker 通信的组件
+    *
+   * 5. Starts the replica state machine  监听各个副本的状态，副本就在 Broker 上的，本质就是监听 Broker 的状态
+    *
+   * 6. Starts the partition state machine    监听分区的状态
+    *
    * If it encounters any unexpected exception/error while becoming controller, it resigns as the current controller.
    * This ensures another controller election will be triggered and there will always be an actively serving controller
+    *
+    * Controller 每次监听到 "/controller/ids" 目录下的节点有变化，就同步给 Broker 集群里其他所有的 Broker
    */
   def onControllerFailover() {
     if(isRunning) {
@@ -346,8 +354,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       registerReassignedPartitionsListener()
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
+
       partitionStateMachine.registerListeners()
+
+      // 监听 brokers/ids 父目录下的所有节点
       replicaStateMachine.registerListeners()
+
       initializeControllerContext()
       replicaStateMachine.startup()
       partitionStateMachine.startup()
@@ -424,8 +436,14 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   /**
    * This callback is invoked by the replica state machine's broker change listener, with the list of newly started
    * brokers as input. It does the following -
+    *
+    * 发送当前 Broker 的元数据信息给所有能感知到的 Broker
    * 1. Sends update metadata request to all live and shutting down brokers
+    *
+    * 一旦有新的 Broker 上线，可能影响到 Partition 分区的变化
    * 2. Triggers the OnlinePartition state change for all new/offline partitions
+    *
+    * 副本重平衡
    * 3. It checks whether there are reassigned replicas assigned to any newly started brokers.  If
    *    so, it performs the reassignment logic for each topic/partition.
    *
@@ -434,15 +452,23 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    *    partitions currently new or offline (rather than every partition this controller is aware of)
    * 2. Even if we do refresh the cache, there is no guarantee that by the time the leader and ISR request reaches
    *    every broker that it is still valid.  Brokers check the leader epoch to determine validity of the request.
+    *
+    * 处理新加入进来的 Broker
    */
   def onBrokerStartup(newBrokers: Seq[Int]) {
     info("New broker startup callback for %s".format(newBrokers.mkString(",")))
     val newBrokersSet = newBrokers.toSet
+
+
     // send update metadata request to all live and shutting down brokers. Old brokers will get to know of the new
     // broker via this update.
     // In cases of controlled shutdown leaders will not be elected when a new broker comes up. So at least in the
     // common controlled shutdown case, the metadata will reach the new brokers faster
+    /**
+      * 把元数据信息同步给其他 Broker
+      */
     sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
+
     // the very first thing to do when a new broker comes up is send it the entire list of partitions that it is
     // supposed to host. Based on that the broker starts the high watermark threads for the input list of partitions
     val allReplicasOnNewBrokers = controllerContext.replicasOnBrokers(newBrokersSet)
@@ -1041,6 +1067,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * metadata requests
    *
    * @param brokers The brokers that the update metadata request should be sent to
+    * 推送元数据变更信息，给所有能感知到的 Broker
    */
   def sendUpdateMetadataRequest(brokers: Seq[Int], partitions: Set[TopicAndPartition] = Set.empty[TopicAndPartition]) {
     try {

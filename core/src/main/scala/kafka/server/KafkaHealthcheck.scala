@@ -36,6 +36,11 @@ import org.apache.zookeeper.Watcher.Event.KeeperState
  *   
  * Right now our definition of health is fairly naive. If we register in zk we are healthy, otherwise
  * we are dead.
+  *
+  * 这个命名其实是非常不靠谱的
+  * 这个组件其实就是负责把每个 Broker 注册到 zk 上去的，如果注册上去就是 health
+  * 如果说 Broker 宕机了，那么 zk 上的临时节点就没了，就不是 health 了
+  * 注册的 znode 的 路径 是 /brokers/ids/0，/brokers/ids/1 ，其实就是 Broker 启动的时候那个 BrokerId
  */
 class KafkaHealthcheck(brokerId: Int,
                        advertisedEndpoints: Map[SecurityProtocol, EndPoint],
@@ -48,11 +53,14 @@ class KafkaHealthcheck(brokerId: Int,
 
   def startup() {
     zkUtils.zkClient.subscribeStateChanges(sessionExpireListener)
+
+    // 把当前 Broker 对应的 znode 注册到 zk 上，格式为 "/brokers/ids/0"
     register()
   }
 
   /**
    * Register this broker as "alive" in zookeeper
+    * 把当前 Broker 对应的 znode 注册到 zk 上
    */
   def register() {
     val jmxPort = System.getProperty("com.sun.management.jmxremote.port", "-1").toInt
@@ -67,6 +75,8 @@ class KafkaHealthcheck(brokerId: Int,
     // only PLAINTEXT is supported as default
     // if the broker doesn't listen on PLAINTEXT protocol, an empty endpoint will be registered and older clients will be unable to connect
     val plaintextEndpoint = updatedEndpoints.getOrElse(SecurityProtocol.PLAINTEXT, new EndPoint(null,-1,null))
+
+    // 把当前 Broker 注册到 zk 上去
     zkUtils.registerBrokerInZk(brokerId, plaintextEndpoint.host, plaintextEndpoint.port, updatedEndpoints, jmxPort, rack,
       interBrokerProtocolVersion)
   }

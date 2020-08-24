@@ -109,6 +109,8 @@ object AdminUtils extends Logging with AdminUtilities {
    * @return a Map from partition id to replica ids
    * @throws AdminOperationException If rack information is supplied but it is incomplete, or if it is not possible to
    *                                 assign each replica to a unique rack.
+    *
+    * 根据所有 Broker 的元数据信息，为所有 Broker 均匀的分配 Partition
    *
    */
   def assignReplicasToBrokers(brokerMetadatas: Seq[BrokerMetadata],
@@ -123,6 +125,8 @@ object AdminUtils extends Logging with AdminUtilities {
     if (replicationFactor > brokerMetadatas.size)
       throw new InvalidReplicationFactorException(s"replication factor: $replicationFactor larger than available brokers: ${brokerMetadatas.size}")
     if (brokerMetadatas.forall(_.rack.isEmpty))
+
+      // 均匀的把所有 Partition 分配给 Topic
       assignReplicasToBrokersRackUnaware(nPartitions, replicationFactor, brokerMetadatas.map(_.id), fixedStartIndex,
         startPartitionId)
     else {
@@ -404,17 +408,28 @@ object AdminUtils extends Logging with AdminUtilities {
     brokerMetadatas.sortBy(_.id)
   }
 
+  /**
+    * Kafka 自己控制重平衡来创建 Broker
+    */
   def createTopic(zkUtils: ZkUtils,
                   topic: String,
                   partitions: Int,
                   replicationFactor: Int,
                   topicConfig: Properties = new Properties,
                   rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
+    // 发送网络请求，获取所有 Broker 元数据信息
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
+
+    // 为所有 Broker 均匀分配 Partition 分区
     val replicaAssignment = AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitions, replicationFactor)
+
+    // 根据 Partition 分配的结果，在 Broker 上创建对应的 Partition
     AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, topic, replicaAssignment, topicConfig)
   }
 
+  /**
+    * 根据 Partition 分配的结果，在对应 Broker 上创建 Partition
+    */
   def createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils: ZkUtils,
                                                      topic: String,
                                                      partitionReplicaAssignment: Map[Int, Seq[Int]],
@@ -425,6 +440,8 @@ object AdminUtils extends Logging with AdminUtilities {
 
     val topicPath = getTopicPath(topic)
 
+    // 在哪些 Broker 上创建了哪个 Topic 的哪些 Partition？
+    // 把这些相关的元数据信息写入 zk
     if (!update) {
       if (zkUtils.zkClient.exists(topicPath))
         throw new TopicExistsException("Topic \"%s\" already exists.".format(topic))
@@ -447,16 +464,24 @@ object AdminUtils extends Logging with AdminUtilities {
 
 
     // Configs only matter if a topic is being created. Changing configs via AlterTopic is not supported
+    // 在哪些 Broker 上创建了哪个 Topic 的哪些 Partition？
+    // 把这些相关的元数据信息写入 zk
     if (!update) {
       // write out the config if there is any, this isn't transactional with the partition assignments
       LogConfig.validate(config)
+
       writeEntityConfig(zkUtils, getEntityConfigPath(ConfigType.Topic, topic), config)
     }
 
     // create the partition assignment
+    // 把刚才 Partition 分配的结果写入 zk
     writeTopicPartitionAssignment(zkUtils, topic, partitionReplicaAssignment, update)
   }
 
+  /**
+    * 维护 zk 元数据
+    * 把之前创建 Topic 的时候，对 Partition 做好的分配写入 zk
+    */
   private def writeTopicPartitionAssignment(zkUtils: ZkUtils, topic: String, replicaAssignment: Map[Int, Seq[Int]], update: Boolean) {
     try {
       val zkPath = getTopicPath(topic)

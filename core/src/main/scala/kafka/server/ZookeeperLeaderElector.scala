@@ -50,7 +50,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   def startup {
     inLock(controllerContext.controllerLock) {
       /**
-        * 在 electionPath 这个路径上注册一个监听器
+        * 在 electionPath 这个路径上注册一个监听器，并且注册 Controller 节点变化之后的回调函数（所谓 "/controller" 节点变化，其实就是 Controller 宕机了）
         * 如果有人竞争成为了 Controller，他会感知到
         * 如果有 Controller 挂了，他也能感知到
         */
@@ -153,6 +153,8 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   /**
    * We do not have session expiration listen in the ZkElection, but assuming the caller who uses this module will
    * have its own session expiration listener and handler
+    *
+    * Controller 宕机之后，就会回调到这个 Listener
    */
   class LeaderChangeListener extends IZkDataListener with Logging {
     /**
@@ -175,6 +177,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
      * Called when the leader information stored in zookeeper has been delete. Try to elect as the leader
      * @throws Exception
      *             On any error.
+      * Controller 宕机之后就会回调这个方法，触发 Controller 的重新选举
      */
     @throws(classOf[Exception])
     def handleDataDeleted(dataPath: String) {
