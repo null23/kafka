@@ -390,6 +390,9 @@ object AdminUtils extends Logging with AdminUtilities {
   def topicExists(zkUtils: ZkUtils, topic: String): Boolean =
     zkUtils.zkClient.exists(getTopicPath(topic))
 
+  /**
+    * 从 zk 上获取所有 Broker 的元数据信息
+    */
   def getBrokerMetadatas(zkUtils: ZkUtils, rackAwareMode: RackAwareMode = RackAwareMode.Enforced,
                         brokerList: Option[Seq[Int]] = None): Seq[BrokerMetadata] = {
     val allBrokers = zkUtils.getAllBrokersInCluster()
@@ -417,7 +420,7 @@ object AdminUtils extends Logging with AdminUtilities {
                   replicationFactor: Int,
                   topicConfig: Properties = new Properties,
                   rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
-    // 发送网络请求，获取所有 Broker 元数据信息
+    // 从 zk 获取所有 Broker 元数据信息
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
 
     // 为所有 Broker 均匀分配 Partition 分区

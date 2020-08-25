@@ -368,7 +368,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       info("Broker %d is ready to serve as the new controller with epoch %d".format(config.brokerId, epoch))
       maybeTriggerPartitionReassignment()
       maybeTriggerPreferredReplicaElection()
+
+
       /* send partition leadership info to all live brokers */
+      /**
+        * 同步所有更新的元数据给 所有Broker
+        */
       sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
       if (config.autoLeaderRebalanceEnable) {
         info("starting the partition rebalance scheduler")
