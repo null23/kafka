@@ -398,6 +398,8 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
                 // 处理新加入进来的 Broker
                 controller.onBrokerStartup(newBrokerIdsSorted)
               if(deadBrokerIds.nonEmpty)
+
+                // Broker 宕机之后的处理
                 controller.onBrokerFailure(deadBrokerIdsSorted)
             } catch {
               case e: Throwable => error("Error while handling broker changes", e)

@@ -55,6 +55,10 @@ class ControllerContext(val zkUtils: ZkUtils,
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   var allTopics: Set[String] = Set.empty
+
+  /**
+    * 分区副本的分配方案
+    */
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
@@ -195,6 +199,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   private val controlledShutdownPartitionLeaderSelector = new ControlledShutdownLeaderSelector(controllerContext)
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(this)
 
+  /**
+    * 副本重平衡
+    */
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
   private val preferredReplicaElectionListener = new PreferredReplicaElectionListener(this)
   private val isrChangeNotificationListener = new IsrChangeNotificationListener(this)
@@ -350,14 +357,17 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       readControllerEpochFromZookeeper()
       // increment the controller epoch
       incrementControllerEpoch(zkUtils.zkClient)
+
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
+      // 注册 "/admin/reassign_partitions" 的监听器，监听副本重平衡的操作
       registerReassignedPartitionsListener()
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
 
+      // 注册 "broker/topic" 目录的监听，Controller 就可以感知所有 Topic 的新增和删除
       partitionStateMachine.registerListeners()
 
-      // 监听 brokers/ids 父目录下的所有节点
+      // 监听 "brokers/ids" 父目录下的所有节点
       replicaStateMachine.registerListeners()
 
       initializeControllerContext()
@@ -508,6 +518,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point.  This is because
    * the partition state machine will refresh our cache for us when performing leader election for all new/offline
    * partitions coming online.
+    *
+    * Broker 宕机之后的处理
+    * 可能会选举一个新的 Leader，然后把元数据信息推送给所有的 Broker
    */
   def onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
@@ -519,6 +532,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     val partitionsWithoutLeader = controllerContext.partitionLeadershipInfo.filter(partitionAndLeader =>
       deadBrokersSet.contains(partitionAndLeader._2.leaderAndIsr.leader) &&
         !deleteTopicManager.isTopicQueuedUpForDeletion(partitionAndLeader._1.topic)).keySet
+
+    // 处理新的分区的结果，推送元数据信息给所有 Broker
     partitionStateMachine.handleStateChanges(partitionsWithoutLeader, OfflinePartition)
     // trigger OnlinePartition state changes for offline or new partitions
     partitionStateMachine.triggerOnlinePartitionStateChange()
@@ -549,10 +564,13 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 1. Registers partition change listener. This is not required until KAFKA-347
    * 2. Invokes the new partition callback
    * 3. Send metadata request with the new topic to all brokers so they allow requests for that topic to be served
+    *
+    * 对新创建的分区进行处理，注册每个新的分区的监听器
    */
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
+
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
     onNewPartitionCreation(newPartitions)
   }
@@ -575,17 +593,42 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * This callback is invoked by the reassigned partitions listener. When an admin command initiates a partition
    * reassignment, it creates the /admin/reassign_partitions path that triggers the zookeeper listener.
    * Reassigning replicas for a partition goes through a few steps listed in the code.
+    *
+    * 重平衡的副本
    * RAR = Reassigned replicas
+    *
+    * 原始的副本分配的列表
    * OAR = Original list of replicas for partition
+    *
+    * 最新的副本分配的列表
    * AR = current assigned replicas
    *
    * 1. Update AR in ZK with OAR + RAR.
+    * 每个 Topic 创建的时候都有一个副本分配的方案写入 zk 中
+    * 基于重分配的方案，更新 zk 中的副本分配的方案
+    *
+    *
    * 2. Send LeaderAndIsr request to every replica in OAR + RAR (with AR as OAR + RAR). We do this by forcing an update
    *    of the leader epoch in zookeeper.
+    *    对于重新分配的副本，每个副本所在的 Broker 都发送一个请求，LeaderAndIsr
+    *
+    *
    * 3. Start new replicas RAR - OAR by moving replicas in RAR - OAR to NewReplica state.
+    * 开启新分配的副本，通过副本迁移来实现
+    *
+    *
    * 4. Wait until all replicas in RAR are in sync with the leader.
+    * 等待一直到重新分配的副本和 Leader 保持同步，就认为重分配成功了
+    *
+    *
    * 5  Move all replicas in RAR to OnlineReplica state.
+    * 把迁移后的新分配的副本全部改为 ： Online 状态
+    *
+    *
    * 6. Set AR to RAR in memory.
+    * 更新内存中的副本的状态
+    *
+    *
    * 7. If the leader is not in RAR, elect a new leader from RAR. If new leader needs to be elected from RAR, a LeaderAndIsr
    *    will be sent. If not, then leader epoch will be incremented in zookeeper and a LeaderAndIsr request will be sent.
    *    In any case, the LeaderAndIsr request will have AR = RAR. This will prevent the leader from adding any replica in
@@ -603,14 +646,21 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * may go through the following transition.
    * AR                 leader/isr
    * {1,2,3}            1/{1,2,3}           (initial state)
-   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2)
-   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4)
+   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2)     // 在 zk 中新增 456 三个副本，Controller 一定会感知到，然后推送元数据到所有 Broker
+    * 456 三个 Broker 感知到自己成为了 Follower 之后，就会 makeFollowers()，然后就会创建 fetch 线程从 Leader 拉取元数据
+    *
+    * // 注意这里，其实当前就是多了 3 个副本
+   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4)    // 一共有 6 个副本同时同步 Leader 的数据
    * {1,2,3,4,5,6}      4/{1,2,3,4,5,6}     (step 7)
    * {1,2,3,4,5,6}      4/{4,5,6}           (step 8)
    * {4,5,6}            4/{4,5,6}           (step 10)
+    * // 如果 新增的 456 三个 Follower 同步完成（在 Leader 保持同步）
+    * // 那么就可以先从 456 里选出一个新的 Leader，然后再把之前的 3 个 Follower 从 ISR 列表里踢出就可以
    *
    * Note that we have to update AR in ZK with RAR last since it's the only place where we store OAR persistently.
    * This way, if the controller crashes before that step, we can still recover.
+    *
+    * 重平衡的具体逻辑
    */
   def onPartitionReassignment(topicAndPartition: TopicAndPartition, reassignedPartitionContext: ReassignedPartitionsContext) {
     val reassignedReplicas = reassignedPartitionContext.newReplicas
@@ -667,6 +717,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     zkUtils.zkClient.subscribeDataChanges(getTopicPartitionLeaderAndIsrPath(topic, partition), isrChangeListener)
   }
 
+  /**
+    * 重平衡
+    */
   def initiateReassignReplicasForTopicPartition(topicAndPartition: TopicAndPartition,
                                         reassignedPartitionContext: ReassignedPartitionsContext) {
     val newReplicas = reassignedPartitionContext.newReplicas
@@ -687,6 +740,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
             controllerContext.partitionsBeingReassigned.put(topicAndPartition, reassignedPartitionContext)
             // mark topic ineligible for deletion for the partitions being reassigned
             deleteTopicManager.markTopicIneligibleForDeletion(Set(topic))
+
+            // 重平衡的具体逻辑
             onPartitionReassignment(topicAndPartition, reassignedPartitionContext)
           }
         case None => throw new KafkaException("Attempt to reassign partition %s that doesn't exist"
@@ -1294,6 +1349,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
  * 3. Any replica in the new set of replicas are dead
  * If any of the above conditions are satisfied, it logs an error and removes the partition from list of reassigned
  * partitions.
+  *
+  * 副本重平衡
  */
 class PartitionsReassignedListener(controller: KafkaController) extends IZkDataListener with Logging {
   this.logIdent = "[PartitionsReassignedListener on " + controller.config.brokerId + "]: "
@@ -1321,6 +1378,8 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
           controller.removePartitionFromReassignedPartitions(partitionToBeReassigned._1)
         } else {
           val context = new ReassignedPartitionsContext(partitionToBeReassigned._2)
+
+          // 重平衡的具体逻辑
           controller.initiateReassignReplicasForTopicPartition(partitionToBeReassigned._1, context)
         }
       }

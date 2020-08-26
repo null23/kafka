@@ -73,6 +73,9 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   }
 
   // register topic and partition change listeners
+  /**
+    * 注册 "broker/topic" 目录的监听，Controller 就可以感知所有 Broker 的上线和下线
+    */
   def registerListeners() {
     registerTopicChangeListener()
     if(controller.config.deleteTopicEnable)
@@ -135,6 +138,8 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * This API is invoked by the partition change zookeeper listener
    * @param partitions   The list of partitions that need to be transitioned to the target state
    * @param targetState  The state that the partitions should be moved to
+    *
+    * 处理 Broker 状态的变更
    */
   def handleStateChanges(partitions: Set[TopicAndPartition], targetState: PartitionState,
                          leaderSelector: PartitionLeaderSelector = noOpPartitionLeaderSelector,
@@ -174,6 +179,8 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param topic       The topic of the partition for which the state transition is invoked
    * @param partition   The partition for which the state transition is invoked
    * @param targetState The end state that the partition should be moved to
+    *
+    * 处理 Broker 状态的变更
    */
   private def handleStateChange(topic: String, partition: Int, targetState: PartitionState,
                                 leaderSelector: PartitionLeaderSelector,
@@ -202,6 +209,8 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
               // initialize leader and isr path for new partition
               initializeLeaderAndIsrForPartition(topicAndPartition)
             case OfflinePartition =>
+
+              // 选举出来新的 Leader，肯定是选择同步的数据最多的 Follower 成为新的 Leader
               electLeaderForPartition(topic, partition, leaderSelector)
             case OnlinePartition => // invoked when the leader needs to be re-elected
               electLeaderForPartition(topic, partition, leaderSelector)
@@ -318,6 +327,9 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param topic               The topic of the offline partition
    * @param partition           The offline partition
    * @param leaderSelector      Specific leader selector (e.g., offline/reassigned/etc.)
+    *
+    * 选举出来新的 Leader
+    * 肯定是选择同步进度最大的 Follower，也就是 LEO 最大的 Follower
    */
   def electLeaderForPartition(topic: String, partition: Int, leaderSelector: PartitionLeaderSelector) {
     val topicAndPartition = TopicAndPartition(topic, partition)
@@ -341,6 +353,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
           throw new StateChangeFailedException(failMsg)
         }
         // elect new leader or throw exception
+        // 选择一个新的 Leader
         val (leaderAndIsr, replicas) = leaderSelector.selectLeader(topicAndPartition, currentLeaderAndIsr)
         val (updateSucceeded, newVersion) = ReplicationUtils.updateLeaderAndIsr(zkUtils, topic, partition,
           leaderAndIsr, controller.epoch, currentLeaderAndIsr.zkVersion)
@@ -426,13 +439,18 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
             val deletedTopics = controllerContext.allTopics -- currentChildren
             controllerContext.allTopics = currentChildren
 
+            // 从 zk 获取副本分配的方案，每一个 Partition 分别都在哪些 Broker 上
             val addedPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(newTopics.toSeq)
+
+            // 存储副本分配的方案到 Controller 上
             controllerContext.partitionReplicaAssignment = controllerContext.partitionReplicaAssignment.filter(p =>
               !deletedTopics.contains(p._1.topic))
             controllerContext.partitionReplicaAssignment.++=(addedPartitionReplicaAssignment)
+
             info("New topics: [%s], deleted topics: [%s], new partition replica assignment [%s]".format(newTopics,
               deletedTopics, addedPartitionReplicaAssignment))
             if(newTopics.nonEmpty)
+              // 对新创建的分区进行处理，注册回调函数
               controller.onNewTopicCreation(newTopics, addedPartitionReplicaAssignment.keySet.toSet)
           } catch {
             case e: Throwable => error("Error while handling new topic", e )

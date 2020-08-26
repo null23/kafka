@@ -675,6 +675,10 @@ class ZkUtils(val zkClient: ZkClient,
     ret
   }
 
+  /**
+    * 获取每一个分区的副本分配的方案
+    * 把一个 Topic 的所有 Partition 的 Replica 在 Brokers 上的分配情况获取到
+    */
   def getReplicaAssignmentForTopics(topics: Seq[String]): mutable.Map[TopicAndPartition, Seq[Int]] = {
     val ret = new mutable.HashMap[TopicAndPartition, Seq[Int]]
     topics.foreach { topic =>
@@ -686,6 +690,10 @@ class ZkUtils(val zkClient: ZkClient,
               case Some(repl)  =>
                 val replicaMap = repl.asInstanceOf[Map[String, Seq[Int]]]
                 for((partition, replicas) <- replicaMap){
+
+                  // partition0 -> [0,1]
+                  // partition1 -> [1,2]
+                  // partition2 -> [0,2]
                   ret.put(TopicAndPartition(topic, partition.toInt), replicas)
                   debug("Replicas assigned to topic [%s], partition [%s] are [%s]".format(topic, partition, replicas))
                 }
