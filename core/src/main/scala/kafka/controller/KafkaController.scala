@@ -570,6 +570,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 3. Send metadata request with the new topic to all brokers so they allow requests for that topic to be served
     *
     * 对新创建的分区进行处理，选举出新的 Leader，同步元数据信息给所有 Broker，注册每个新的分区的监听器
+    *
+    * 主要其实就是通过 Partition 和 Replica 的状态机来维护状态的变更
    */
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
@@ -586,15 +588,23 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * It does the following -
    * 1. Move the newly created partitions to the NewPartition state
    * 2. Move the newly created partitions from NewPartition->OnlinePartition state
+    *
+    * 通过 Partition 和 Replica 的状态机，维护 Partition 和 Replica 的状态流转
    */
   def onNewPartitionCreation(newPartitions: Set[TopicAndPartition]) {
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
+
+    // PartitionState: Init -> NewPartition
     partitionStateMachine.handleStateChanges(newPartitions, NewPartition)
+
+    // ReplicaState: Init -> NewReplica
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), NewReplica)
 
+    // PartitionState: NewPartition -> OnlinePartition
     // 选举 Leader Partition
     partitionStateMachine.handleStateChanges(newPartitions, OnlinePartition, offlinePartitionSelector)
 
+    // ReplicaState: NewReplica -> OnlineReplica
     // 把选举之后的结果等，发送给所有感知到的存活的 Broker
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), OnlineReplica)
   }

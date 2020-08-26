@@ -429,6 +429,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   class TopicChangeListener extends IZkChildListener with Logging {
     this.logIdent = "[TopicChangeListener on Controller " + controller.config.brokerId + "]: "
 
+    /**
+      * 处理 "/brokers/topics" Topic 相关的回调函数
+      * @param parentPath   "/brokers/topics" 回调函数就是通过监听这个父节点来监听底下的子节点的变更的
+      * @param children     "/brokers/topics" 下发生变更的临时节点，可能是新增临时节点，可能是删除临时节点，总之是发生变化的临时节点
+      */
     @throws(classOf[Exception])
     def handleChildChange(parentPath : String, children : java.util.List[String]) {
       inLock(controllerContext.controllerLock) {
@@ -439,10 +444,17 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
               debug("Topic change listener fired for path %s with children %s".format(parentPath, children.mkString(",")))
               (children: Buffer[String]).toSet
             }
+
+            // 新创建的 Topic
             val newTopics = currentChildren -- controllerContext.allTopics
+
+            // 删除的 Topic
             val deletedTopics = controllerContext.allTopics -- currentChildren
             controllerContext.allTopics = currentChildren
 
+            // 新创建的 Topic，脚本自动创建的时候，就向 zk 上写了分区的结果
+            // 这里需要根据读取的 zk 的分区结果，来选举 Leader 等
+            // 把这些元数据信息，通过 Controller 同步给所有的 Broker
             // 从 zk 获取副本分配的方案，每一个 Partition 分别都在哪些 Broker 上
             val addedPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(newTopics.toSeq)
 
