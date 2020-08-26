@@ -140,6 +140,9 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param targetState  The state that the partitions should be moved to
     *
     * 处理 Broker 状态的变更
+    *
+    * 根据 targetState 使用 状态机 来维护元数据，选举 Leader Partition 等一系列操作
+    * 把元数据信息同步给所有能感知到的 Broker
    */
   def handleStateChanges(partitions: Set[TopicAndPartition], targetState: PartitionState,
                          leaderSelector: PartitionLeaderSelector = noOpPartitionLeaderSelector,
@@ -181,6 +184,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param targetState The end state that the partition should be moved to
     *
     * 处理 Broker 状态的变更
+    * 根据状态机的合法的流转，维护每个 Partition 的状态
    */
   private def handleStateChange(topic: String, partition: Int, targetState: PartitionState,
                                 leaderSelector: PartitionLeaderSelector,
@@ -450,7 +454,8 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
             info("New topics: [%s], deleted topics: [%s], new partition replica assignment [%s]".format(newTopics,
               deletedTopics, addedPartitionReplicaAssignment))
             if(newTopics.nonEmpty)
-              // 对新创建的分区进行处理，注册回调函数
+              // 对新创建的分区进行处理
+              // 根据所有的 Partition 选举出一个新的 Leader，把元数据信息推送给所有对应的 Broker，并且为这些 Broker 的 Partition 注册回调函数
               controller.onNewTopicCreation(newTopics, addedPartitionReplicaAssignment.keySet.toSet)
           } catch {
             case e: Throwable => error("Error while handling new topic", e )

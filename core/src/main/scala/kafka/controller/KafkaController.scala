@@ -189,6 +189,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   private val autoRebalanceScheduler = new KafkaScheduler(1)
 
   var deleteTopicManager: TopicDeletionManager = null
+
+  /**
+    * 选举分区 Leader 的组件
+    */
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
 
   /**
@@ -565,13 +569,15 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 2. Invokes the new partition callback
    * 3. Send metadata request with the new topic to all brokers so they allow requests for that topic to be served
     *
-    * 对新创建的分区进行处理，注册每个新的分区的监听器
+    * 对新创建的分区进行处理，选举出新的 Leader，同步元数据信息给所有 Broker，注册每个新的分区的监听器
    */
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
 
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
+
+    // 核心逻辑
     onNewPartitionCreation(newPartitions)
   }
 
@@ -585,7 +591,11 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
     partitionStateMachine.handleStateChanges(newPartitions, NewPartition)
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), NewReplica)
+
+    // 选举 Leader Partition
     partitionStateMachine.handleStateChanges(newPartitions, OnlinePartition, offlinePartitionSelector)
+
+    // 把选举之后的结果等，发送给所有感知到的存活的 Broker
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), OnlineReplica)
   }
 
