@@ -189,6 +189,9 @@ public abstract class AbstractCoordinator implements Closeable {
      */
     public synchronized void ensureCoordinatorReady() {
         while (coordinatorUnknown()) {
+            /**
+             * 找到一个 Broker 作为 GroupCoordinator
+             */
             RequestFuture<Void> future = lookupCoordinator();
             client.poll(future);
 
@@ -209,6 +212,7 @@ public abstract class AbstractCoordinator implements Closeable {
     protected synchronized RequestFuture<Void> lookupCoordinator() {
         if (findCoordinatorFuture == null) {
             // find a node to ask about the coordinator
+            // 找一个负载最低的 Broker，根据这个 Broker 中的 Broker集群 的元数据信息，找到一个 GroupCoordinator
             Node node = this.client.leastLoadedNode();
             if (node == null) {
                 // TODO: If there are no brokers left, perhaps we should use the bootstrap set
@@ -272,8 +276,15 @@ public abstract class AbstractCoordinator implements Closeable {
     public void ensureActiveGroup() {
         // always ensure that the coordinator is ready because we may have been disconnected
         // when sending heartbeats and does not necessarily require us to rejoin the group.
+        /**
+         * 先在 Broker 集群里找到一个 GroupCoordinator，ConsumerGroup 之后都是和 GroupCoordinator 交互的，比如发送 SyncGroup 请求之类的
+         */
         ensureCoordinatorReady();
         startHeartbeatThreadIfNeeded();
+
+        /**
+         * 找到 GroupCoordinator 之后，发送 SyncGroup 请求
+         */
         joinGroupIfNeeded();
     }
 
@@ -289,9 +300,14 @@ public abstract class AbstractCoordinator implements Closeable {
             heartbeatThread.disable();
     }
 
+    /**
+     * 给 GroupCoordinator 发送 JoinGroup 的请求
+     */
     // visible for testing. Joins the group without starting the heartbeat thread.
     void joinGroupIfNeeded() {
         while (needRejoin() || rejoinIncomplete()) {
+
+            // 核心方法
             ensureCoordinatorReady();
 
             // call onJoinPrepare if needed. We set a flag to make sure that we do not call it a second
@@ -304,12 +320,22 @@ public abstract class AbstractCoordinator implements Closeable {
                 needsJoinPrepare = false;
             }
 
+            /**
+             * 向之前找到的 GroupCoordinator 发送 JoinGroup 的请求
+             */
             RequestFuture<ByteBuffer> future = initiateJoinGroup();
             client.poll(future);
             resetJoinGroupFuture();
 
+            /**
+             * 如果 JoinGroup 请求都发送完毕，也就是此时该通过 Consumer Leader 分配分区方案了
+             */
             if (future.succeeded()) {
                 needsJoinPrepare = true;
+
+                /**
+                 * 发送 JoinGroup 请求处理完毕
+                 */
                 onJoinComplete(generation.generationId, generation.memberId, generation.protocol, future.value());
             } else {
                 RuntimeException exception = future.exception();
@@ -328,6 +354,9 @@ public abstract class AbstractCoordinator implements Closeable {
         this.joinFuture = null;
     }
 
+    /**
+     * 向 GroupCoordinator 发送 JoinGroup 请求
+     */
     private synchronized RequestFuture<ByteBuffer> initiateJoinGroup() {
         // we store the join future in case we are woken up by the user after beginning the
         // rebalance in the call to poll below. This ensures that we do not mistakenly attempt
@@ -339,6 +368,10 @@ public abstract class AbstractCoordinator implements Closeable {
             disableHeartbeatThread();
 
             state = MemberState.REBALANCING;
+
+            /**
+             * 向 GroupCoordinator 发送 SyncGroup 的请求
+             */
             joinFuture = sendJoinGroupRequest();
             joinFuture.addListener(new RequestFutureListener<ByteBuffer>() {
                 @Override
@@ -388,10 +421,15 @@ public abstract class AbstractCoordinator implements Closeable {
                 metadata());
 
         log.debug("Sending JoinGroup ({}) to coordinator {}", request, this.coordinator);
+
+        // JoinGroupResponseHandler 处理 JoinGroup 的响应，Consumer Leader 会进行副本方案的分配
         return client.send(coordinator, ApiKeys.JOIN_GROUP, request)
                 .compose(new JoinGroupResponseHandler());
     }
 
+    /**
+     * 处理 joinGroup 的响应，Consumer Leader 会进行副本方案的分配
+     */
     private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
 
         @Override
@@ -402,6 +440,8 @@ public abstract class AbstractCoordinator implements Closeable {
         @Override
         public void handle(JoinGroupResponse joinResponse, RequestFuture<ByteBuffer> future) {
             Errors error = Errors.forCode(joinResponse.errorCode());
+
+            // 根据响应处理 JoinGroup 的响应
             if (error == Errors.NONE) {
                 log.debug("Received successful join group response for group {}: {}", groupId, joinResponse.toStruct());
                 sensors.joinLatency.record(response.requestLatencyMs());
@@ -415,6 +455,9 @@ public abstract class AbstractCoordinator implements Closeable {
                         AbstractCoordinator.this.generation = new Generation(joinResponse.generationId(),
                                 joinResponse.memberId(), joinResponse.groupProtocol());
                         AbstractCoordinator.this.rejoinNeeded = false;
+
+                        // 对 Consumer Group 中的所有 Consumer 进行分区消费方案的分配
+                        // 这里会再次发送 SyncGroup 的请求给 GroupCoordinator
                         if (joinResponse.isLeader()) {
                             onJoinLeader(joinResponse).chain(future);
                         } else {
@@ -461,12 +504,17 @@ public abstract class AbstractCoordinator implements Closeable {
         return sendSyncGroupRequest(request);
     }
 
+    /**
+     * 发送 SyncGroup 的请求给 GroupCoordinator
+     */
     private RequestFuture<ByteBuffer> onJoinLeader(JoinGroupResponse joinResponse) {
         try {
             // perform the leader synchronization and send back the assignment for the group
+            // Consumer Leader 进行分区方案的分配
             Map<String, ByteBuffer> groupAssignment = performAssignment(joinResponse.leaderId(), joinResponse.groupProtocol(),
                     joinResponse.members());
 
+            // 把分区分配方案发送给 GroupCoordinator，之后 GroupCoordinator 会把分区分配方案下发给所有的 Consumer
             SyncGroupRequest request = new SyncGroupRequest(groupId, generation.generationId, generation.memberId, groupAssignment);
             log.debug("Sending leader SyncGroup for group {} to coordinator {}: {}", groupId, this.coordinator, request);
             return sendSyncGroupRequest(request);

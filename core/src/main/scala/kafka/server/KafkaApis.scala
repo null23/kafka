@@ -93,10 +93,16 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.CONTROLLED_SHUTDOWN_KEY => handleControlledShutdownRequest(request)
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
+
+        // 寻找一个 Broker 作为 GroupCoordinator，当然这个 Broker 是集群中负载最低的
         case ApiKeys.GROUP_COORDINATOR => handleGroupCoordinatorRequest(request)
+
+        // Consumer Group 中所有的 Consumer 向这台作为 GroupCoordinator 的 Broker 发送 JoinGroup 请求
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
+
+        // Leader Consumer 发送了制定好的分区分配方案给当前这台作为 GroupCoordinator 的 Broker
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
         case ApiKeys.DESCRIBE_GROUPS => handleDescribeGroupRequest(request)
         case ApiKeys.LIST_GROUPS => handleListGroupsRequest(request)
@@ -976,6 +982,9 @@ class KafkaApis(val requestChannel: RequestChannel,
     requestChannel.sendResponse(new Response(request, new ResponseSend(request.connectionId, responseHeader, offsetFetchResponse)))
   }
 
+  /**
+    * 根据当前 Broker 的 Broker集群 的元数据信息，在 Broker集群 中找到对应的 GroupCoordinator
+    */
   def handleGroupCoordinatorRequest(request: RequestChannel.Request) {
     val groupCoordinatorRequest = request.body.asInstanceOf[GroupCoordinatorRequest]
     val responseHeader = new ResponseHeader(request.header.correlationId)

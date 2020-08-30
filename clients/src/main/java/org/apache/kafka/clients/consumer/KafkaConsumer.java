@@ -658,6 +658,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             List<PartitionAssignor> assignors = config.getConfiguredInstances(
                     ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                     PartitionAssignor.class);
+
+            /**
+             * 核心的组件
+             */
             this.coordinator = new ConsumerCoordinator(this.client,
                     config.getString(ConsumerConfig.GROUP_ID_CONFIG),
                     config.getInt(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
@@ -961,6 +965,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws java.lang.IllegalArgumentException if the timeout value is negative
      * @throws java.lang.IllegalStateException if the consumer is not subscribed to any topics or manually assigned any
      *             partitions to consume from
+     *
+     * Consumer 客户端调用，客户端肯定是 while true 调用这个方法的
+     * 调用之后，每次都会 poll 出来 ConsumerRecords，然后 Consumer 客户端自己解析之后执行自己的业务逻辑就行了
      */
     @Override
     public ConsumerRecords<K, V> poll(long timeout) {
@@ -976,6 +983,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             long start = time.milliseconds();
             long remaining = timeout;
             do {
+                /**
+                 * Consumer 客户端调用 poll 之后，走到这里
+                 */
                 Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollOnce(remaining);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -987,6 +997,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     fetcher.sendFetches();
                     client.pollNoWakeup();
 
+                    // 直接返回 ConsumerRecord 给 Consumer 客户端，Consumer 客户端解析之后执行自己的消费的逻辑
                     if (this.interceptors == null)
                         return new ConsumerRecords<>(records);
                     else
@@ -1008,8 +1019,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * (if auto-commit is enabled), and offset resets (if an offset reset policy is defined).
      * @param timeout The maximum time to block in the underlying call to {@link ConsumerNetworkClient#poll(long)}.
      * @return The fetched records (may be empty)
+     *
+     * Consumer 消费消息
      */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
+        /**
+         * 消费
+         */
         coordinator.poll(time.milliseconds());
 
         // fetch positions if we have partitions we're subscribed to that we

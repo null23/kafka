@@ -240,6 +240,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * if they are enabled.
      *
      * @param now current time in milliseconds
+     *
+     * 从 Broker 拉取消息
      */
     public void poll(long now) {
         invokeCompletedOffsetCommitCallbacks();
@@ -256,6 +258,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             if (subscriptions.hasPatternSubscription())
                 client.ensureFreshMetadata();
 
+            /**
+             * 给 Consumer 分配 Topic
+             */
             ensureActiveGroup();
             now = time.milliseconds();
         }
@@ -279,6 +284,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return Math.min(nextAutoCommitDeadline - now, timeToNextHeartbeat(now));
     }
 
+    /**
+     * 针对 ConsumerGroup 中的所有 Consumer 进行分区方案的分配
+     */
     @Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
