@@ -526,7 +526,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     * Broker 宕机之后的处理
     * 可能会选举一个新的 Leader，然后把元数据信息推送给所有的 Broker
    */
-  def onBrokerFailure(deadBrokers: Seq[Int]) {
+  def  onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
     val deadBrokersThatWereShuttingDown =
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
