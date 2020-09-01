@@ -1035,10 +1035,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
         // if data is available already, return it immediately
         Map<TopicPartition, List<ConsumerRecord<K, V>>> records = fetcher.fetchedRecords();
+
+        // 如果拉取到数据，直接返回
         if (!records.isEmpty())
             return records;
 
         // send any new fetches (won't resend pending fetches)
+        // 如果没有拉取到数据，此时就会异步调度延时一段时间去拉取
         fetcher.sendFetches();
 
         long now = time.milliseconds();

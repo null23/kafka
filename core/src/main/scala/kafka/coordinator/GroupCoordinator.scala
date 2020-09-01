@@ -188,7 +188,11 @@ class GroupCoordinator(val brokerId: Int,
               }
             }
 
+            // Empty 是最初始的状态
+            // Stable 是有新的 Consumer 加入进来，需要重平衡
           case Empty | Stable =>
+
+            // 处理新加入的 Consumer
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
               // if the member id is unknown, register the member to the group
               addMemberAndRebalance(rebalanceTimeoutMs, sessionTimeoutMs, clientId, clientHost, protocolType, protocols, group, responseCallback)
@@ -331,6 +335,9 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+    * Consumer 定时发送的心跳
+    */
   def handleHeartbeat(groupId: String,
                       memberId: String,
                       generationId: Int,
@@ -384,6 +391,10 @@ class GroupCoordinator(val brokerId: Int,
                   responseCallback(Errors.ILLEGAL_GENERATION.code)
                 } else {
                   val member = group.get(memberId)
+
+                  /**
+                    * 通过 scheduler 延时调度下一次心跳 check
+                     */
                   completeAndScheduleNextHeartbeatExpiration(group, member)
                   responseCallback(Errors.NONE.code)
                 }
@@ -589,6 +600,7 @@ class GroupCoordinator(val brokerId: Int,
 
   /**
    * Complete existing DelayedHeartbeats for the given member and schedule the next one
+    * 生成检查心跳的延时调度任务
    */
   private def completeAndScheduleNextHeartbeatExpiration(group: GroupMetadata, member: MemberMetadata) {
     // complete current heartbeat expectation
@@ -608,6 +620,9 @@ class GroupCoordinator(val brokerId: Int,
     heartbeatPurgatory.checkAndComplete(memberKey)
   }
 
+  /**
+    * 处理新加入的 Consumer，做重平衡
+    */
   private def addMemberAndRebalance(rebalanceTimeoutMs: Int,
                                     sessionTimeoutMs: Int,
                                     clientId: String,
@@ -635,6 +650,9 @@ class GroupCoordinator(val brokerId: Int,
     maybePrepareRebalance(group)
   }
 
+  /**
+    * 对 ConsumerGroup 里的 Consumer 进行重平衡
+    */
   private def maybePrepareRebalance(group: GroupMetadata) {
     group synchronized {
       if (group.canRebalance)
@@ -642,6 +660,9 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+    * 处理重平衡
+    */
   private def prepareRebalance(group: GroupMetadata) {
     // if any members are awaiting sync, cancel their request and have them rejoin
     if (group.is(AwaitingSync))
@@ -656,11 +677,16 @@ class GroupCoordinator(val brokerId: Int,
     joinPurgatory.tryCompleteElseWatch(delayedRebalance, Seq(groupKey))
   }
 
+  /**
+    * 处理没有按时心跳的 Consumer
+    */
   private def onMemberFailure(group: GroupMetadata, member: MemberMetadata) {
     trace("Member %s in group %s has failed".format(member.memberId, group.groupId))
     group.remove(member.memberId)
     group.currentState match {
       case Dead | Empty =>
+
+      // 重新触发 ConsumerGroup 里的 Rebalance
       case Stable | AwaitingSync => maybePrepareRebalance(group)
       case PreparingRebalance => joinPurgatory.checkAndComplete(GroupKey(group.groupId))
     }
@@ -734,9 +760,14 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+    * 处理超过时间仍没有心跳的 Consumer，做 Rebalance
+    */
   def onExpireHeartbeat(group: GroupMetadata, member: MemberMetadata, heartbeatDeadline: Long) {
     group synchronized {
       if (!shouldKeepMemberAlive(member, heartbeatDeadline))
+
+        // 处理没有按时心跳的 Consumer
         onMemberFailure(group, member)
     }
   }

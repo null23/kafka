@@ -265,7 +265,14 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             now = time.milliseconds();
         }
 
+        /**
+         * 发送心跳
+         */
         pollHeartbeat(now);
+
+        /**
+         * 自动提交 offset
+         */
         maybeAutoCommitOffsetsAsync(now);
     }
 
@@ -430,6 +437,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
 
+    /**
+     * 提交 offset 给对应的 _consumer_offsets
+     * 其实就是提交给对应的 GroupCoordinator 那台 Broker 所在的机器
+     */
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
         invokeCompletedOffsetCommitCallbacks();
 

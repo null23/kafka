@@ -99,6 +99,8 @@ class KafkaApis(val requestChannel: RequestChannel,
 
         // Consumer Group 中所有的 Consumer 向这台作为 GroupCoordinator 的 Broker 发送 JoinGroup 请求
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
+
+        // Consumer 向对应的 GroupCoordinator 定时 30s 发送一次心跳
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
 
@@ -1123,6 +1125,9 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  /**
+    * 处理心跳的请求
+    */
   def handleHeartbeatRequest(request: RequestChannel.Request) {
     val heartbeatRequest = request.body.asInstanceOf[HeartbeatRequest]
     val respHeader = new ResponseHeader(request.header.correlationId)

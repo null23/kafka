@@ -22,6 +22,8 @@ import kafka.server.DelayedOperation
 /**
  * Delayed heartbeat operations that are added to the purgatory for session timeout checking.
  * Heartbeats are paused during rebalance.
+  *
+  * 心跳的延时调度相关的操作
  */
 private[coordinator] class DelayedHeartbeat(coordinator: GroupCoordinator,
                                             group: GroupMetadata,
@@ -35,6 +37,8 @@ private[coordinator] class DelayedHeartbeat(coordinator: GroupCoordinator,
   override def safeTryComplete(): Boolean = tryComplete()
 
   override def tryComplete(): Boolean = coordinator.tryCompleteHeartbeat(group, member, heartbeatDeadline, forceComplete)
+
+  // 超时
   override def onExpiration() = coordinator.onExpireHeartbeat(group, member, heartbeatDeadline)
   override def onComplete() = coordinator.onCompleteHeartbeat()
 }
