@@ -282,6 +282,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @return the maximum time in milliseconds the caller should wait before the next invocation of poll()
      */
     public long timeToNextPoll(long now) {
+        // 不允许自动提交
         if (!autoCommitEnabled)
             return timeToNextHeartbeat(now);
 

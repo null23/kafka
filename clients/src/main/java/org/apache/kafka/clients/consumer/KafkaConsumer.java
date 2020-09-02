@@ -679,6 +679,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     config.getInt(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),
                     this.interceptors,
                     config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG));
+
+            /**
+             * 从 Broker 拉取消息的组件
+             */
             this.fetcher = new Fetcher<>(this.client,
                     config.getInt(ConsumerConfig.FETCH_MIN_BYTES_CONFIG),
                     config.getInt(ConsumerConfig.FETCH_MAX_BYTES_CONFIG),
@@ -1044,11 +1048,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             return records;
 
         // send any new fetches (won't resend pending fetches)
-        // 拉取数据
+        // 拉取数据，先把 fetch 请求暂存下
         // 如果没有拉取到数据，此时就会异步调度延时一段时间去拉取
         fetcher.sendFetches();
 
         long now = time.milliseconds();
+
+        // 心跳时间默认 3000ms，超时时间默认 1000ms
+        // poll 延时的时间：min(下次心跳的时间，超时时间)
         long pollTimeout = Math.min(coordinator.timeToNextPoll(now), timeout);
 
         client.poll(pollTimeout, now, new PollCondition() {
