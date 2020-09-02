@@ -994,6 +994,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     //
                     // NOTE: since the consumed position has already been updated, we must not allow
                     // wakeups or any other errors to be triggered prior to returning the fetched records.
+                    /**
+                     * Consumer 客户端发送 fetch 请求，从 Broker 拉取消息
+                     */
                     fetcher.sendFetches();
                     client.pollNoWakeup();
 
@@ -1041,6 +1044,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             return records;
 
         // send any new fetches (won't resend pending fetches)
+        // 拉取数据
         // 如果没有拉取到数据，此时就会异步调度延时一段时间去拉取
         fetcher.sendFetches();
 
