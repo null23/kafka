@@ -110,11 +110,18 @@ object AdminUtils extends Logging with AdminUtilities {
    * @throws AdminOperationException If rack information is supplied but it is incomplete, or if it is not possible to
    *                                 assign each replica to a unique rack.
     *
+    *
     * 根据所有 Broker 的元数据信息，为所有 Broker 均匀的分配 Partition
    *
    */
-  def assignReplicasToBrokers(brokerMetadatas: Seq[BrokerMetadata],
+  def assignReplicasToBrokers(
+                              // 从 zk 获取的 Broker 元数据相关信息
+                              brokerMetadatas: Seq[BrokerMetadata],
+
+                              // Partition 分区的数量
                               nPartitions: Int,
+
+                              // 副本的数量
                               replicationFactor: Int,
                               fixedStartIndex: Int = -1,
                               startPartitionId: Int = -1): Map[Int, Seq[Int]] = {
@@ -137,19 +144,35 @@ object AdminUtils extends Logging with AdminUtilities {
     }
   }
 
+  /**
+    * 均匀的把 分区 以及 分区的副本 均匀分配给所有 Broker
+    */
   private def assignReplicasToBrokersRackUnaware(nPartitions: Int,
                                                  replicationFactor: Int,
                                                  brokerList: Seq[Int],
                                                  fixedStartIndex: Int,
                                                  startPartitionId: Int): Map[Int, Seq[Int]] = {
+    // 副本分配的结果
     val ret = mutable.Map[Int, Seq[Int]]()
+
+    // 副本的列表
     val brokerArray = brokerList.toArray
+
+    // 根据所有 Broker 列表长度的随机数
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+
+    // currentPartitionId 就是 0
     var currentPartitionId = math.max(0, startPartitionId)
+
+    // 根据所有 Broker 列表长度的随机数
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+
+
     for (_ <- 0 until nPartitions) {
       if (currentPartitionId > 0 && (currentPartitionId % brokerArray.length == 0))
         nextReplicaShift += 1
+
+      // 其实就是随机分配给一个副本
       val firstReplicaIndex = (currentPartitionId + startIndex) % brokerArray.length
       val replicaBuffer = mutable.ArrayBuffer(brokerArray(firstReplicaIndex))
       for (j <- 0 until replicationFactor - 1)
@@ -416,7 +439,11 @@ object AdminUtils extends Logging with AdminUtilities {
     */
   def createTopic(zkUtils: ZkUtils,
                   topic: String,
+
+                  // Partition 数量
                   partitions: Int,
+
+                  // 副本数量
                   replicationFactor: Int,
                   topicConfig: Properties = new Properties,
                   rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
