@@ -172,8 +172,10 @@ object AdminUtils extends Logging with AdminUtilities {
       if (currentPartitionId > 0 && (currentPartitionId % brokerArray.length == 0))
         nextReplicaShift += 1
 
-      // 其实就是随机分配给一个副本
+      // firstReplicaIndex 就是 (随机数 % BrokerLength)，其实也是一个随机数
       val firstReplicaIndex = (currentPartitionId + startIndex) % brokerArray.length
+
+      // 根据随机的 firstReplicaIndex 在 Broker 列表中拿到一个 Broker
       val replicaBuffer = mutable.ArrayBuffer(brokerArray(firstReplicaIndex))
       for (j <- 0 until replicationFactor - 1)
         replicaBuffer += brokerArray(replicaIndex(firstReplicaIndex, nextReplicaShift, j, brokerArray.length))
