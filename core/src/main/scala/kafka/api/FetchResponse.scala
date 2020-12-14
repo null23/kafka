@@ -70,6 +70,8 @@ class PartitionDataSend(val partitionId: Int,
 
   override def destination: String = ""
 
+
+  // zero-copy
   override def writeTo(channel: GatheringByteChannel): Long = {
     var written = 0L
     if (buffer.hasRemaining)
