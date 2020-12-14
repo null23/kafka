@@ -98,6 +98,8 @@ public interface TransportLayer extends ScatteringByteChannel, GatheringByteChan
      * @param count The maximum number of bytes to be transferred; must be non-negative
      * @return The number of bytes, possibly zero, that were actually transferred
      * @see FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)
+     *
+     * 零拷贝的方式
      */
     long transferFrom(FileChannel fileChannel, long position, long count) throws IOException;
 
