@@ -1032,6 +1032,8 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         /**
          * 消费
+         * 这里就会发送心跳
+         * 在 AbstractCoordinator 里发送心跳
          */
         coordinator.poll(time.milliseconds());
 
