@@ -481,6 +481,9 @@ class KafkaApis(val requestChannel: RequestChannel,
   /**
    * Handle a fetch request
     * 处理来自 Follower 的 fetch 消息的请求
+    *
+    * 底层调用 零拷贝
+    *kafka.api.PartitionDataSend#writeTo(java.nio.channels.GatheringByteChannel)
    */
   def handleFetchRequest(request: RequestChannel.Request) {
     val fetchRequest = request.requestObj.asInstanceOf[FetchRequest]
